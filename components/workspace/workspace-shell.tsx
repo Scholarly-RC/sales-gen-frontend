@@ -9,9 +9,12 @@ import {
   Pencil,
   PlusCircle,
   Power,
+  RefreshCw,
+  Square,
   Trash2,
   UserRound,
   Users,
+  X,
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -83,7 +86,74 @@ type ExportForm = {
   dateTo?: string;
 };
 
+type OcrJobStatus = "queued" | "running" | "failed" | "done" | "stopped";
+
+type OcrJob = {
+  id: string;
+  submission_id: string;
+  client_id: string;
+  user_id: string;
+  queue_message_id: string | null;
+  file_name: string;
+  content_type: string;
+  file_size_bytes: number;
+  status: OcrJobStatus;
+  extracted_text: string | null;
+  raw_ocr: unknown;
+  error_message: string | null;
+  created_at: string;
+  updated_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+};
+
+type OcrSubmissionResponse = {
+  submission_id: string;
+  summary: {
+    total_files: number;
+    queued: number;
+    running: number;
+    failed: number;
+    done: number;
+  };
+  results: OcrJob[];
+  compiled: {
+    combined_markdown: string;
+  };
+};
+
+type OcrEnqueueResponse = {
+  submission_id: string;
+  total_files: number;
+  jobs: OcrJob[];
+};
+
 const MAX_IMAGE_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+function upsertOcrJobs(current: OcrJob[], updates: OcrJob[]) {
+  const map = new Map(current.map((job) => [job.id, job]));
+  for (const job of updates) {
+    map.set(job.id, job);
+  }
+  return Array.from(map.values()).sort(
+    (a, b) =>
+      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
+  );
+}
+
+function buildWebSocketUrl(token: string) {
+  const explicit = process.env.NEXT_PUBLIC_API_WS_URL;
+  if (explicit) {
+    const normalized = explicit.endsWith("/")
+      ? explicit.slice(0, -1)
+      : explicit;
+    return `${normalized}/ws/ocr-jobs?token=${encodeURIComponent(token)}`;
+  }
+
+  const fromApi = `${window.location.origin}${API_BASE_URL}`;
+  const wsBase = fromApi.replace(/^http/, "ws").replace(/\/$/, "");
+  return `${wsBase}/ws/ocr-jobs?token=${encodeURIComponent(token)}`;
+}
 
 const clientSchema = z.object({
   name: z.string().trim().min(1, "Name is required"),
@@ -264,6 +334,9 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
   const [exportForm, setExportForm] = useState<ExportForm>({});
   const [saleImages, setSaleImages] = useState<File[]>([]);
   const [saleImagesError, setSaleImagesError] = useState<string | null>(null);
+  const [ocrJobs, setOcrJobs] = useState<OcrJob[]>([]);
+  const [ocrDebugJson, setOcrDebugJson] = useState<string | null>(null);
+  const [isRunningOcr, setIsRunningOcr] = useState(false);
 
   const [isCreatingExport, setIsCreatingExport] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
@@ -274,6 +347,14 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
   const [isLoadingExports, setIsLoadingExports] = useState(false);
   const [userFormError, setUserFormError] = useState<string | null>(null);
   const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
+
+  const activeQueueCount = useMemo(
+    () =>
+      ocrJobs.filter(
+        (job) => job.status === "queued" || job.status === "running",
+      ).length,
+    [ocrJobs],
+  );
 
   const clientForm = useForm<ClientFormValues>({
     defaultValues: {
@@ -407,6 +488,52 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
 
     loadExports(token);
   }, [token, section, loadExports]);
+
+  const loadOcrJobs = useCallback(async (accessToken: string) => {
+    try {
+      const rows = await request<OcrJob[]>("/ocr-jobs", accessToken);
+      setOcrJobs(rows);
+    } catch {
+      setOcrJobs([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    loadOcrJobs(token);
+  }, [token, loadOcrJobs]);
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    const socket = new WebSocket(buildWebSocketUrl(token));
+
+    socket.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as {
+          type?: string;
+          job?: OcrJob;
+        };
+
+        if (payload.type === "job_update" && payload.job) {
+          setOcrJobs((previous) =>
+            upsertOcrJobs(previous, [payload.job as OcrJob]),
+          );
+        }
+      } catch {
+        // Ignore non-JSON heartbeat messages.
+      }
+    };
+
+    return () => {
+      socket.close();
+    };
+  }, [token]);
 
   function handleLogout() {
     clearAuthToken();
@@ -718,6 +845,142 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     }
   }
 
+  async function handleRunOcrDebug() {
+    if (!token || !selectedClientId) {
+      return;
+    }
+
+    if (!saleImages.length) {
+      setSaleImagesError("Select at least one image.");
+      return;
+    }
+
+    if (saleImagesError) {
+      return;
+    }
+
+    setIsRunningOcr(true);
+
+    try {
+      const formData = new FormData();
+      for (const image of saleImages) {
+        formData.append("images", image);
+      }
+
+      const enqueueResponse = await fetch(
+        `${API_BASE_URL}/clients/${selectedClientId}/ocr-debug`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+          body: formData,
+        },
+      );
+
+      if (!enqueueResponse.ok) {
+        const message = await enqueueResponse.text();
+        throw new Error(message || "Unable to enqueue OCR task");
+      }
+
+      const queued = (await enqueueResponse.json()) as OcrEnqueueResponse;
+      setOcrJobs((previous) => upsertOcrJobs(previous, queued.jobs));
+
+      let latest: OcrSubmissionResponse | null = null;
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        latest = await request<OcrSubmissionResponse>(
+          `/ocr-submissions/${queued.submission_id}`,
+          token,
+        );
+        setOcrJobs((previous) =>
+          upsertOcrJobs(previous, latest?.results ?? []),
+        );
+        setOcrDebugJson(JSON.stringify(latest, null, 2));
+
+        const done = latest.summary.done + latest.summary.failed;
+        if (done >= latest.summary.total_files) {
+          break;
+        }
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to run OCR debug";
+      appToast.error({
+        title: "OCR debug failed",
+        description: message,
+      });
+    } finally {
+      setIsRunningOcr(false);
+    }
+  }
+
+  async function handleRetryFailedOcrJob(jobId: string) {
+    if (!token) {
+      return;
+    }
+
+    try {
+      const updated = await request<OcrJob>(`/ocr-jobs/${jobId}/retry`, token, {
+        method: "POST",
+      });
+      setOcrJobs((previous) => upsertOcrJobs(previous, [updated]));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to retry OCR task";
+      appToast.error({
+        title: "OCR retry failed",
+        description: message,
+      });
+    }
+  }
+
+  async function handleStopQueuedOcrJob(jobId: string) {
+    if (!token) {
+      return;
+    }
+
+    try {
+      const updated = await request<OcrJob>(`/ocr-jobs/${jobId}/stop`, token, {
+        method: "POST",
+      });
+      setOcrJobs((previous) => upsertOcrJobs(previous, [updated]));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to stop OCR job";
+      appToast.error({
+        title: "Stop OCR job failed",
+        description: message,
+      });
+    }
+  }
+
+  async function handleRemoveFinishedOcrJobs() {
+    if (!token) {
+      return;
+    }
+
+    try {
+      await request<void>("/ocr-jobs/finished", token, {
+        method: "DELETE",
+      });
+      setOcrJobs((previous) =>
+        previous.filter(
+          (entry) => entry.status === "queued" || entry.status === "running",
+        ),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Unable to remove finished OCR jobs";
+      appToast.error({
+        title: "Remove finished failed",
+        description: message,
+      });
+    }
+  }
+
   function handleSaleImagesChange(event: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files ?? []);
 
@@ -1026,6 +1289,74 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         </section>
       </main>
 
+      <aside className="fixed right-4 bottom-4 z-40 w-[min(92vw,380px)] rounded-2xl border border-border/70 bg-background/95 p-4 shadow-lg backdrop-blur">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold">OCR Queue</h3>
+          <div className="flex items-center gap-2">
+            <Badge variant={activeQueueCount > 0 ? "default" : "secondary"}>
+              {activeQueueCount} active
+            </Badge>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={handleRemoveFinishedOcrJobs}
+            >
+              <X className="size-3.5" />
+              Remove finished
+            </Button>
+          </div>
+        </div>
+        <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
+          {ocrJobs.length ? (
+            ocrJobs.map((job) => (
+              <div
+                key={job.id}
+                className="rounded-lg border border-border/70 p-2 text-xs"
+              >
+                <p className="truncate font-medium">{job.file_name}</p>
+                <p className="mt-1 text-muted-foreground">
+                  {job.status.toUpperCase()}
+                </p>
+                {job.error_message ? (
+                  <p className="mt-1 line-clamp-2 text-destructive">
+                    {job.error_message}
+                  </p>
+                ) : null}
+                <div className="mt-2 flex items-center gap-2">
+                  {job.status === "queued" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleStopQueuedOcrJob(job.id)}
+                    >
+                      <Square className="size-3.5" />
+                      Stop
+                    </Button>
+                  ) : null}
+                  {job.status === "failed" ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void handleRetryFailedOcrJob(job.id)}
+                    >
+                      <RefreshCw className="size-3.5" />
+                      Retry
+                    </Button>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              No queued OCR jobs yet.
+            </p>
+          )}
+        </div>
+      </aside>
+
       <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>
         <DialogContent>
           <DialogHeader>
@@ -1192,6 +1523,34 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               )}
               Add Client Sale
             </Button>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleRunOcrDebug}
+              disabled={
+                isRunningOcr ||
+                !selectedSalesClient ||
+                !!saleImagesError ||
+                !saleImages.length
+              }
+            >
+              {isRunningOcr ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ArrowUpRight className="size-4" />
+              )}
+              Run OCR Debug
+            </Button>
+            {ocrDebugJson ? (
+              <div className="max-h-72 overflow-auto rounded-xl border border-border/70 bg-muted/40 p-3">
+                <p className="mb-2 text-xs font-medium">
+                  Latest OCR Debug JSON
+                </p>
+                <pre className="text-xs whitespace-pre-wrap">
+                  {ocrDebugJson}
+                </pre>
+              </div>
+            ) : null}
           </form>
         </DialogContent>
       </Dialog>
