@@ -1,0 +1,1223 @@
+"use client";
+
+import {
+  ArrowUpRight,
+  FileOutput,
+  LayoutDashboard,
+  LoaderCircle,
+  LogOut,
+  Pencil,
+  PlusCircle,
+  Power,
+  Trash2,
+  UserRound,
+  Users,
+} from "lucide-react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+
+import { ConfirmationModal } from "@/components/confirmation-modal";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { Skeleton } from "@/components/ui/skeleton";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { API_BASE_URL } from "@/lib/api";
+import { clearAuthToken, getStoredAuthToken } from "@/lib/auth";
+import { appToast } from "@/lib/toast";
+
+export type WorkspaceSection =
+  | "dashboard"
+  | "clients"
+  | "client-sales"
+  | "users";
+
+type User = {
+  id: string;
+  email: string;
+  is_active: boolean;
+  is_admin: boolean;
+  can_delete?: boolean;
+  created_at: string;
+};
+
+type Client = {
+  id: string;
+  name: string;
+  company: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ClientExport = {
+  id: string;
+  client_id: string;
+  user_id: string;
+  date_from: string | null;
+  date_to: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type ExportForm = {
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+const MAX_IMAGE_FILE_SIZE_BYTES = 2 * 1024 * 1024;
+
+const clientSchema = z.object({
+  name: z.string().trim().min(1, "Name is required"),
+  company: z.string().trim().optional(),
+  notes: z.string().trim().optional(),
+});
+
+type ClientFormValues = z.infer<typeof clientSchema>;
+
+const userSchema = z.object({
+  email: z.string().trim().email("Valid email is required"),
+  password: z
+    .string()
+    .min(8, "Password must be at least 8 characters")
+    .optional(),
+  is_admin: z.boolean(),
+  is_active: z.boolean().optional(),
+});
+
+type UserFormValues = z.infer<typeof userSchema>;
+
+function formatDate(value: string) {
+  return new Intl.DateTimeFormat("en-US", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(value));
+}
+
+async function request<T>(
+  path: string,
+  token: string,
+  init?: RequestInit,
+): Promise<T> {
+  const response = await fetch(`${API_BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init?.headers ?? {}),
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    let detail = "Request failed";
+
+    try {
+      const body = await response.json();
+      if (typeof body?.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body?.detail)) {
+        detail = body.detail
+          .map((issue: { msg?: string }) => issue?.msg)
+          .filter(Boolean)
+          .join(", ");
+      } else if (typeof body?.message === "string") {
+        detail = body.message;
+      }
+    } catch {
+      detail = `${response.status} ${response.statusText}`;
+    }
+
+    throw new Error(detail);
+  }
+
+  if (response.status === 204) {
+    return undefined as T;
+  }
+
+  return response.json() as Promise<T>;
+}
+
+const sidebarItems = [
+  {
+    label: "Dashboard",
+    href: "/workspace/dashboard",
+    key: "dashboard" as const,
+    icon: LayoutDashboard,
+  },
+  {
+    label: "Clients",
+    href: "/workspace/clients",
+    key: "clients" as const,
+    icon: UserRound,
+  },
+  {
+    label: "Client Sales",
+    href: "/workspace/client-sales",
+    key: "client-sales" as const,
+    icon: FileOutput,
+  },
+  {
+    label: "Users",
+    href: "/workspace/users",
+    key: "users" as const,
+    icon: Users,
+  },
+];
+
+function WorkspaceNav({ section }: { section: WorkspaceSection }) {
+  return (
+    <nav className="grid gap-2" aria-label="Workspace navigation">
+      {sidebarItems.map((item) => {
+        const Icon = item.icon;
+
+        return (
+          <Button
+            key={item.label}
+            type="button"
+            variant={item.key === section ? "secondary" : "ghost"}
+            className="w-full justify-start"
+            asChild
+          >
+            <Link href={item.href}>
+              <Icon className="size-4" />
+              {item.label}
+            </Link>
+          </Button>
+        );
+      })}
+    </nav>
+  );
+}
+
+function DashboardItems({
+  clients,
+  salesRecords,
+  users,
+}: {
+  clients: Client[];
+  salesRecords: ClientExport[];
+  users: User[];
+}) {
+  const activeUsers = users.filter((user) => user.is_active).length;
+
+  const cards = [
+    { label: "Total Clients", value: clients.length.toString() },
+    { label: "Total Client Sales", value: salesRecords.length.toString() },
+    { label: "Total Users", value: users.length.toString() },
+    { label: "Active Users", value: activeUsers.toString() },
+  ];
+
+  return (
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      {cards.map((card) => (
+        <div
+          key={card.label}
+          className="rounded-xl border border-border/70 bg-background p-4"
+        >
+          <p className="text-sm text-muted-foreground">{card.label}</p>
+          <p className="mt-1 text-2xl font-semibold">{card.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
+  const router = useRouter();
+
+  const [token, setToken] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const [users, setUsers] = useState<User[]>([]);
+  const [clients, setClients] = useState<Client[]>([]);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+  const [exports, setExports] = useState<ClientExport[]>([]);
+
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [selectedUser, setSelectedUser] = useState<User | null>(null);
+  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
+  const [isClientSaleModalOpen, setIsClientSaleModalOpen] = useState(false);
+  const [isDeleteClientModalOpen, setIsDeleteClientModalOpen] = useState(false);
+  const [clientPendingDelete, setClientPendingDelete] = useState<Client | null>(
+    null,
+  );
+
+  const [exportForm, setExportForm] = useState<ExportForm>({});
+  const [saleImages, setSaleImages] = useState<File[]>([]);
+  const [saleImagesError, setSaleImagesError] = useState<string | null>(null);
+
+  const [isCreatingExport, setIsCreatingExport] = useState(false);
+  const [isSavingClient, setIsSavingClient] = useState(false);
+  const [isSavingUser, setIsSavingUser] = useState(false);
+  const [isDeletingClient, setIsDeletingClient] = useState(false);
+
+  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
+  const [isLoadingExports, setIsLoadingExports] = useState(false);
+  const [userFormError, setUserFormError] = useState<string | null>(null);
+  const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
+
+  const clientForm = useForm<ClientFormValues>({
+    defaultValues: {
+      name: "",
+      company: "",
+      notes: "",
+    },
+  });
+
+  const userForm = useForm<UserFormValues>({
+    defaultValues: {
+      email: "",
+      password: "",
+      is_admin: false,
+      is_active: true,
+    },
+  });
+
+  useEffect(() => {
+    const storedToken = getStoredAuthToken();
+    if (!storedToken) {
+      router.replace("/login");
+      return;
+    }
+
+    setToken(storedToken);
+  }, [router]);
+
+  const selectedSalesClient = useMemo(
+    () => clients.find((entry) => entry.id === selectedClientId) ?? null,
+    [clients, selectedClientId],
+  );
+  const usersWithCurrent = useMemo(() => {
+    if (!user) {
+      return users;
+    }
+
+    const hasCurrentUser = users.some((entry) => entry.id === user.id);
+    if (hasCurrentUser) {
+      return users;
+    }
+
+    return [user, ...users];
+  }, [users, user]);
+
+  const loadWorkspace = useCallback(
+    async (accessToken: string) => {
+      setIsLoadingWorkspace(true);
+
+      try {
+        const [me, clientList] = await Promise.all([
+          request<User>("/auth/me", accessToken),
+          request<Client[]>("/clients", accessToken),
+        ]);
+
+        setUser(me);
+        setClients(clientList);
+        setSelectedClientId((previous) => {
+          if (previous && clientList.some((item) => item.id === previous)) {
+            return previous;
+          }
+          return clientList[0]?.id ?? null;
+        });
+        setUsersLoadError(null);
+
+        try {
+          const userList = await request<User[]>("/users", accessToken);
+          setUsers(userList);
+        } catch (error) {
+          setUsers([]);
+          const message =
+            error instanceof Error ? error.message : "Failed to load users";
+          setUsersLoadError(message);
+          appToast.error({
+            title: "Unable to load users",
+            description: message,
+          });
+        }
+      } catch (error) {
+        const message =
+          error instanceof Error ? error.message : "Failed to load workspace";
+        appToast.error({
+          title: "Failed to load workspace",
+          description: message,
+        });
+        clearAuthToken();
+        router.replace("/login");
+      } finally {
+        setIsLoadingWorkspace(false);
+      }
+    },
+    [router],
+  );
+
+  const loadExports = useCallback(
+    async (accessToken: string) => {
+      if (!selectedClientId) {
+        setExports([]);
+        return;
+      }
+
+      setIsLoadingExports(true);
+
+      try {
+        const rows = await request<ClientExport[]>(
+          `/clients/${selectedClientId}/exports`,
+          accessToken,
+        );
+        setExports(rows);
+      } catch {
+        setExports([]);
+      } finally {
+        setIsLoadingExports(false);
+      }
+    },
+    [selectedClientId],
+  );
+
+  useEffect(() => {
+    if (!token) {
+      return;
+    }
+
+    loadWorkspace(token);
+  }, [token, loadWorkspace]);
+
+  useEffect(() => {
+    if (!token || section !== "client-sales") {
+      return;
+    }
+
+    loadExports(token);
+  }, [token, section, loadExports]);
+
+  function handleLogout() {
+    clearAuthToken();
+    router.replace("/login");
+    router.refresh();
+  }
+
+  function openClientCreateModal() {
+    setSelectedClient(null);
+    clientForm.reset({ name: "", company: "", notes: "" });
+    setIsClientModalOpen(true);
+  }
+
+  function openClientEditModal(client: Client) {
+    setSelectedClient(client);
+    clientForm.reset({
+      name: client.name,
+      company: client.company || "",
+      notes: client.notes || "",
+    });
+    setIsClientModalOpen(true);
+  }
+
+  async function submitClientForm(values: ClientFormValues) {
+    if (!token) {
+      return;
+    }
+
+    const parsed = clientSchema.safeParse(values);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0] as keyof ClientFormValues;
+        clientForm.setError(field, { message: issue.message });
+      }
+      return;
+    }
+
+    setIsSavingClient(true);
+
+    try {
+      if (selectedClient) {
+        const updated = await request<Client>(
+          `/clients/${selectedClient.id}`,
+          token,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              name: parsed.data.name,
+              company: parsed.data.company || null,
+              notes: parsed.data.notes || null,
+            }),
+          },
+        );
+
+        setClients((previous) =>
+          previous.map((client) =>
+            client.id === updated.id ? updated : client,
+          ),
+        );
+      } else {
+        const created = await request<Client>("/clients", token, {
+          method: "POST",
+          body: JSON.stringify({
+            name: parsed.data.name,
+            company: parsed.data.company || null,
+            notes: parsed.data.notes || null,
+          }),
+        });
+
+        setClients((previous) => [created, ...previous]);
+      }
+
+      setIsClientModalOpen(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to save client";
+      appToast.error({
+        title: "Unable to save client",
+        description: message,
+      });
+    } finally {
+      setIsSavingClient(false);
+    }
+  }
+
+  function openDeleteClientModal(client: Client) {
+    setClientPendingDelete(client);
+    setIsDeleteClientModalOpen(true);
+  }
+
+  async function handleDeleteClient() {
+    if (!token) {
+      return;
+    }
+
+    if (!clientPendingDelete) {
+      return;
+    }
+
+    const client = clientPendingDelete;
+    setIsDeletingClient(true);
+
+    try {
+      const linkedSales = await request<ClientExport[]>(
+        `/clients/${client.id}/exports`,
+        token,
+      );
+
+      if (linkedSales.length > 0) {
+        appToast.error({
+          title: "Unable to delete client",
+          description:
+            "Client cannot be deleted because it is referenced by client sales.",
+        });
+        return;
+      }
+
+      await request<void>(`/clients/${client.id}`, token, { method: "DELETE" });
+      setClients((previous) =>
+        previous.filter((entry) => entry.id !== client.id),
+      );
+      setSelectedClientId((previous) =>
+        previous === client.id ? null : previous,
+      );
+      setClientPendingDelete(null);
+      setIsDeleteClientModalOpen(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to delete client";
+      appToast.error({
+        title: "Unable to delete client",
+        description: message,
+      });
+    } finally {
+      setIsDeletingClient(false);
+    }
+  }
+
+  function openUserCreateModal() {
+    setSelectedUser(null);
+    setUserFormError(null);
+    userForm.reset({
+      email: "",
+      password: "",
+      is_admin: false,
+      is_active: true,
+    });
+    setIsUserModalOpen(true);
+  }
+
+  function openUserEditModal(nextUser: User) {
+    setSelectedUser(nextUser);
+    setUserFormError(null);
+    userForm.reset({
+      email: nextUser.email,
+      password: "",
+      is_admin: nextUser.is_admin,
+      is_active: nextUser.is_active,
+    });
+    setIsUserModalOpen(true);
+  }
+
+  async function submitUserForm(values: UserFormValues) {
+    if (!token) {
+      return;
+    }
+
+    setUserFormError(null);
+
+    if (!selectedUser && !values.password) {
+      userForm.setError("password", {
+        message: "Password is required for new users",
+      });
+      return;
+    }
+
+    const parsed = userSchema.safeParse(values);
+    if (!parsed.success) {
+      for (const issue of parsed.error.issues) {
+        const field = issue.path[0] as keyof UserFormValues;
+        userForm.setError(field, { message: issue.message });
+      }
+      return;
+    }
+
+    setIsSavingUser(true);
+
+    try {
+      if (selectedUser) {
+        const updated = await request<User>(
+          `/users/${selectedUser.id}`,
+          token,
+          {
+            method: "PUT",
+            body: JSON.stringify({
+              email: parsed.data.email,
+              is_admin: parsed.data.is_admin,
+              is_active: parsed.data.is_active ?? true,
+            }),
+          },
+        );
+
+        setUsers((previous) =>
+          previous.map((entry) => (entry.id === updated.id ? updated : entry)),
+        );
+      } else {
+        const created = await request<User>("/users", token, {
+          method: "POST",
+          body: JSON.stringify({
+            email: parsed.data.email,
+            password: parsed.data.password,
+            is_admin: parsed.data.is_admin,
+          }),
+        });
+
+        setUsers((previous) => [created, ...previous]);
+      }
+
+      setIsUserModalOpen(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to save user";
+      setUserFormError(message);
+      appToast.error({
+        title: "Unable to save user",
+        description: message,
+      });
+    } finally {
+      setIsSavingUser(false);
+    }
+  }
+
+  async function handleDeleteUser(userId: string) {
+    if (!token) {
+      return;
+    }
+
+    try {
+      await request<void>(`/users/${userId}`, token, { method: "DELETE" });
+      setUsers((previous) => previous.filter((entry) => entry.id !== userId));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to delete user";
+      appToast.error({
+        title: "Unable to delete user",
+        description: message,
+      });
+    }
+  }
+
+  async function handleActivateUser(userId: string) {
+    if (!token) {
+      return;
+    }
+
+    try {
+      const updated = await request<User>(`/users/${userId}/activate`, token, {
+        method: "POST",
+      });
+
+      setUsers((previous) =>
+        previous.map((entry) => (entry.id === updated.id ? updated : entry)),
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to activate user";
+      appToast.error({
+        title: "Unable to activate user",
+        description: message,
+      });
+    }
+  }
+
+  async function handleCreateExport(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!token || !selectedClientId) {
+      return;
+    }
+
+    setIsCreatingExport(true);
+
+    try {
+      const created = await request<ClientExport>(
+        `/clients/${selectedClientId}/exports`,
+        token,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            ...(exportForm.dateFrom ? { date_from: exportForm.dateFrom } : {}),
+            ...(exportForm.dateTo ? { date_to: exportForm.dateTo } : {}),
+          }),
+        },
+      );
+
+      setExports((previous) => [created, ...previous]);
+      setExportForm({});
+      setSaleImages([]);
+      setSaleImagesError(null);
+      setIsClientSaleModalOpen(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to create sale export";
+      appToast.error({
+        title: "Unable to create sale export",
+        description: message,
+      });
+    } finally {
+      setIsCreatingExport(false);
+    }
+  }
+
+  function handleSaleImagesChange(event: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(event.target.files ?? []);
+
+    if (!files.length) {
+      setSaleImages([]);
+      setSaleImagesError(null);
+      return;
+    }
+
+    const hasNonImage = files.some((file) => !file.type.startsWith("image/"));
+    if (hasNonImage) {
+      setSaleImages([]);
+      setSaleImagesError("Only image files are allowed.");
+      return;
+    }
+
+    const hasOversizedFile = files.some(
+      (file) => file.size > MAX_IMAGE_FILE_SIZE_BYTES,
+    );
+    if (hasOversizedFile) {
+      setSaleImages([]);
+      setSaleImagesError("Each image must be 2MB or smaller.");
+      return;
+    }
+
+    setSaleImages(files);
+    setSaleImagesError(null);
+  }
+
+  const pageTitle =
+    section === "dashboard"
+      ? "Dashboard Items"
+      : section === "clients"
+        ? "Clients"
+        : section === "client-sales"
+          ? "Client Sales"
+          : "Users";
+
+  return (
+    <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
+      <div className="pointer-events-none absolute inset-0 -z-10 bg-[radial-gradient(circle_at_10%_10%,oklch(0.92_0.06_225),transparent_45%),radial-gradient(circle_at_90%_0%,oklch(0.96_0.03_70),transparent_30%)]" />
+      <main className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-6 sm:px-8 sm:py-10">
+        <section className="space-y-5 rounded-3xl border border-border/60 bg-background/75 p-6 shadow-sm backdrop-blur sm:p-8">
+          <div className="flex flex-col gap-5 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-xs font-semibold tracking-[0.22em] text-muted-foreground uppercase">
+                Sales Gen
+              </p>
+              <h1 className="mt-2 text-3xl font-semibold tracking-tight sm:text-4xl">
+                {pageTitle}
+              </h1>
+            </div>
+            <div className="flex items-center gap-3">
+              {user ? (
+                <Badge variant={user.is_admin ? "default" : "secondary"}>
+                  <UserRound className="size-3.5" />
+                  {user.is_admin ? "Admin" : "User"}
+                </Badge>
+              ) : null}
+              <Button type="button" variant="outline" onClick={handleLogout}>
+                <LogOut className="size-4" />
+                Sign out
+              </Button>
+            </div>
+          </div>
+        </section>
+
+        <section className="grid gap-5 lg:grid-cols-[300px_1fr]">
+          <aside className="hidden rounded-3xl border border-border/60 bg-background/80 p-5 shadow-sm backdrop-blur lg:block">
+            <h2 className="text-lg font-semibold">Navigation</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              Quick access to workspace sections.
+            </p>
+            <div className="mt-4">
+              <WorkspaceNav section={section} />
+            </div>
+          </aside>
+
+          <article className="rounded-3xl border border-border/60 bg-background/85 p-5 shadow-sm backdrop-blur sm:p-6">
+            {isLoadingWorkspace ? (
+              <div className="grid gap-3">
+                <Skeleton className="h-10" />
+                <Skeleton className="h-32" />
+              </div>
+            ) : null}
+
+            {!isLoadingWorkspace && section === "dashboard" ? (
+              <DashboardItems
+                clients={clients}
+                salesRecords={exports}
+                users={users}
+              />
+            ) : null}
+
+            {!isLoadingWorkspace && section === "clients" ? (
+              <div className="space-y-5">
+                <div className="flex justify-end">
+                  <Button type="button" onClick={openClientCreateModal}>
+                    <PlusCircle className="size-4" />
+                    Add Client
+                  </Button>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-border/70">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Company</TableHead>
+                        <TableHead>Notes</TableHead>
+                        <TableHead className="w-[220px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {clients.map((client) => (
+                        <TableRow key={client.id}>
+                          <TableCell>{client.name}</TableCell>
+                          <TableCell>{client.company || "-"}</TableCell>
+                          <TableCell>{client.notes || "-"}</TableCell>
+                          <TableCell>
+                            <div className="flex gap-2">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => openClientEditModal(client)}
+                              >
+                                <Pencil className="size-4" /> Edit
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="destructive"
+                                onClick={() => openDeleteClientModal(client)}
+                              >
+                                <Trash2 className="size-4" /> Delete
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+                {usersLoadError ? (
+                  <p className="text-sm text-destructive">{usersLoadError}</p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {!isLoadingWorkspace && section === "client-sales" ? (
+              <div className="space-y-5">
+                <div className="grid gap-2">
+                  <Label htmlFor="client-sales-client">Client</Label>
+                  <select
+                    id="client-sales-client"
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+                    value={selectedClientId ?? ""}
+                    onChange={(event) =>
+                      setSelectedClientId(event.target.value || null)
+                    }
+                  >
+                    <option value="">Select client</option>
+                    {clients.map((client) => (
+                      <option key={client.id} value={client.id}>
+                        {client.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button
+                    type="button"
+                    onClick={() => setIsClientSaleModalOpen(true)}
+                    disabled={!selectedSalesClient}
+                  >
+                    <PlusCircle className="size-4" />
+                    Add Client Sale
+                  </Button>
+                </div>
+
+                <Separator />
+
+                <div className="overflow-hidden rounded-xl border border-border/70">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Client</TableHead>
+                        <TableHead>User ID</TableHead>
+                        <TableHead>Date From</TableHead>
+                        <TableHead>Date To</TableHead>
+                        <TableHead>Created</TableHead>
+                        <TableHead>Updated</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingExports ? (
+                        <TableRow>
+                          <TableCell colSpan={6}>Loading...</TableCell>
+                        </TableRow>
+                      ) : exports.length ? (
+                        exports.map((entry) => (
+                          <TableRow key={entry.id}>
+                            <TableCell>
+                              {selectedSalesClient?.name ?? "-"}
+                            </TableCell>
+                            <TableCell>{entry.user_id}</TableCell>
+                            <TableCell>{entry.date_from}</TableCell>
+                            <TableCell>{entry.date_to}</TableCell>
+                            <TableCell>
+                              {formatDate(entry.created_at)}
+                            </TableCell>
+                            <TableCell>
+                              {formatDate(entry.updated_at)}
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={6}
+                            className="text-center text-muted-foreground"
+                          >
+                            No client sales records.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : null}
+
+            {!isLoadingWorkspace && section === "users" ? (
+              <div className="space-y-5">
+                <div className="flex justify-end">
+                  <Button type="button" onClick={openUserCreateModal}>
+                    <PlusCircle className="size-4" />
+                    Add User
+                  </Button>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-border/70">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Email</TableHead>
+                        <TableHead>Status</TableHead>
+                        <TableHead>Role</TableHead>
+                        <TableHead className="w-[280px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {usersWithCurrent.map((entry) => {
+                        const isCurrentUser = user?.id === entry.id;
+
+                        return (
+                          <TableRow key={entry.id}>
+                            <TableCell>{entry.email}</TableCell>
+                            <TableCell>
+                              {entry.is_active ? "Active" : "Inactive"}
+                            </TableCell>
+                            <TableCell>
+                              {entry.is_admin ? "Admin" : "User"}
+                            </TableCell>
+                            <TableCell>
+                              {isCurrentUser ? null : (
+                                <div className="flex gap-2">
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() => openUserEditModal(entry)}
+                                  >
+                                    <Pencil className="size-4" /> Edit
+                                  </Button>
+                                  {entry.can_delete ? (
+                                    <Button
+                                      size="sm"
+                                      variant="destructive"
+                                      onClick={() => handleDeleteUser(entry.id)}
+                                    >
+                                      <Trash2 className="size-4" /> Delete
+                                    </Button>
+                                  ) : !entry.is_active ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() =>
+                                        handleActivateUser(entry.id)
+                                      }
+                                    >
+                                      <Power className="size-4" /> Activate
+                                    </Button>
+                                  ) : null}
+                                </div>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : null}
+          </article>
+        </section>
+      </main>
+
+      <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {selectedClient ? "Edit Client" : "Add Client"}
+            </DialogTitle>
+          </DialogHeader>
+          <form
+            className="grid gap-3"
+            onSubmit={clientForm.handleSubmit(submitClientForm)}
+          >
+            <div className="grid gap-2">
+              <Label>Name</Label>
+              <Input
+                {...clientForm.register("name")}
+                placeholder="Client name"
+              />
+              {clientForm.formState.errors.name ? (
+                <p className="text-xs text-destructive">
+                  {clientForm.formState.errors.name.message}
+                </p>
+              ) : null}
+            </div>
+            <div className="grid gap-2">
+              <Label>Company</Label>
+              <Input
+                {...clientForm.register("company")}
+                placeholder="Company"
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label>Notes</Label>
+              <Input {...clientForm.register("notes")} placeholder="Notes" />
+            </div>
+            <Button type="submit" disabled={isSavingClient}>
+              {isSavingClient ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <PlusCircle className="size-4" />
+              )}
+              {selectedClient ? "Save Client" : "Create Client"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isUserModalOpen}
+        onOpenChange={(open) => {
+          setIsUserModalOpen(open);
+          if (!open) {
+            setUserFormError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{selectedUser ? "Edit User" : "Add User"}</DialogTitle>
+          </DialogHeader>
+          <form
+            className="grid gap-3"
+            onSubmit={userForm.handleSubmit(submitUserForm)}
+          >
+            <div className="grid gap-2">
+              <Label>Email</Label>
+              <Input
+                {...userForm.register("email")}
+                type="email"
+                placeholder="Email"
+              />
+              {userForm.formState.errors.email ? (
+                <p className="text-xs text-destructive">
+                  {userForm.formState.errors.email.message}
+                </p>
+              ) : null}
+            </div>
+            {!selectedUser ? (
+              <div className="grid gap-2">
+                <Label>Password</Label>
+                <Input
+                  {...userForm.register("password")}
+                  type="password"
+                  placeholder="Password"
+                />
+                {userForm.formState.errors.password ? (
+                  <p className="text-xs text-destructive">
+                    {userForm.formState.errors.password.message}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" {...userForm.register("is_admin")} />
+              Admin user
+            </label>
+            {selectedUser ? (
+              <label className="flex items-center gap-2 text-sm">
+                <input type="checkbox" {...userForm.register("is_active")} />
+                Active
+              </label>
+            ) : null}
+            <Button type="submit" disabled={isSavingUser}>
+              {isSavingUser ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <PlusCircle className="size-4" />
+              )}
+              {selectedUser ? "Save User" : "Create User"}
+            </Button>
+            {userFormError ? (
+              <p className="text-xs text-destructive">{userFormError}</p>
+            ) : null}
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isClientSaleModalOpen}
+        onOpenChange={(open) => {
+          setIsClientSaleModalOpen(open);
+          if (!open) {
+            setExportForm({});
+            setSaleImages([]);
+            setSaleImagesError(null);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Client Sale</DialogTitle>
+          </DialogHeader>
+          <form className="grid gap-3" onSubmit={handleCreateExport}>
+            <div className="grid gap-2">
+              <Label htmlFor="client-sale-images">Images</Label>
+              <Input
+                id="client-sale-images"
+                type="file"
+                accept="image/*"
+                multiple
+                onChange={handleSaleImagesChange}
+              />
+              <p className="text-xs text-muted-foreground">
+                Upload one or more images. Maximum size is 2MB per image.
+              </p>
+              {saleImagesError ? (
+                <p className="text-xs text-destructive">{saleImagesError}</p>
+              ) : null}
+              {saleImages.length ? (
+                <p className="text-xs text-muted-foreground">
+                  Selected: {saleImages.map((file) => file.name).join(", ")}
+                </p>
+              ) : null}
+            </div>
+            <Button
+              type="submit"
+              disabled={
+                isCreatingExport || !selectedSalesClient || !!saleImagesError
+              }
+            >
+              {isCreatingExport ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <ArrowUpRight className="size-4" />
+              )}
+              Add Client Sale
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <ConfirmationModal
+        open={isDeleteClientModalOpen}
+        onOpenChange={(open) => {
+          if (isDeletingClient) {
+            return;
+          }
+
+          setIsDeleteClientModalOpen(open);
+          if (!open) {
+            setClientPendingDelete(null);
+          }
+        }}
+        title="Delete client?"
+        description={
+          clientPendingDelete
+            ? `This will permanently delete "${clientPendingDelete.name}".`
+            : undefined
+        }
+        confirmText="Delete client"
+        loading={isDeletingClient}
+        onConfirm={handleDeleteClient}
+      />
+    </div>
+  );
+}
