@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# turbopack
+.turbo/
+
+# local env files (never commit secrets)
+*.local
