@@ -37,9 +37,9 @@ export function ConfirmationModal({
       <DialogContent showCloseButton={!loading}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
-          {description ? (
-            <DialogDescription>{description}</DialogDescription>
-          ) : null}
+          <DialogDescription>
+            {description ?? "Please confirm this action."}
+          </DialogDescription>
         </DialogHeader>
         <DialogFooter>
           <DialogClose asChild>

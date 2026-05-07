@@ -25,14 +25,23 @@ import { z } from "zod";
 import { ConfirmationModal } from "@/components/confirmation-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -81,11 +90,6 @@ type ClientExport = {
   updated_at: string;
 };
 
-type ExportForm = {
-  dateFrom?: string;
-  dateTo?: string;
-};
-
 type OcrJobStatus = "queued" | "running" | "failed" | "done" | "stopped";
 
 type OcrJob = {
@@ -107,25 +111,29 @@ type OcrJob = {
   finished_at: string | null;
 };
 
-type OcrSubmissionResponse = {
-  submission_id: string;
+type OcrParentSubmissionResponse = {
+  parent_submission_id: string;
+  client_id: string;
+  status: "queued" | "running" | "failed" | "done";
   summary: {
     total_files: number;
+    total_batches: number;
     queued: number;
     running: number;
     failed: number;
     done: number;
   };
-  results: OcrJob[];
-  compiled: {
-    combined_markdown: string;
-  };
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  error_message: string | null;
 };
 
-type OcrEnqueueResponse = {
-  submission_id: string;
-  total_files: number;
-  jobs: OcrJob[];
+type OcrSalesExportResponse = {
+  submission_id?: string;
+  parent_submission_id?: string;
+  file_name: string;
+  download_path: string;
 };
 
 const MAX_IMAGE_FILE_SIZE_BYTES = 2 * 1024 * 1024;
@@ -150,8 +158,8 @@ function buildWebSocketUrl(token: string) {
     return `${normalized}/ws/ocr-jobs?token=${encodeURIComponent(token)}`;
   }
 
-  const fromApi = `${window.location.origin}${API_BASE_URL}`;
-  const wsBase = fromApi.replace(/^http/, "ws").replace(/\/$/, "");
+  const proxyTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000";
+  const wsBase = proxyTarget.replace(/^http/, "ws").replace(/\/$/, "");
   return `${wsBase}/ws/ocr-jobs?token=${encodeURIComponent(token)}`;
 }
 
@@ -187,13 +195,17 @@ async function request<T>(
   token: string,
   init?: RequestInit,
 ): Promise<T> {
+  const headers: HeadersInit = {
+    Authorization: `Bearer ${token}`,
+    ...(init?.headers ?? {}),
+  };
+  if (!(init?.body instanceof FormData)) {
+    headers["Content-Type"] = "application/json";
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
     ...init,
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${token}`,
-      ...(init?.headers ?? {}),
-    },
+    headers,
     cache: "no-store",
   });
 
@@ -252,6 +264,8 @@ const sidebarItems = [
     icon: Users,
   },
 ];
+
+const NO_CLIENT_VALUE = "__none__";
 
 function WorkspaceNav({ section }: { section: WorkspaceSection }) {
   return (
@@ -331,14 +345,13 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     null,
   );
 
-  const [exportForm, setExportForm] = useState<ExportForm>({});
   const [saleImages, setSaleImages] = useState<File[]>([]);
   const [saleImagesError, setSaleImagesError] = useState<string | null>(null);
   const [ocrJobs, setOcrJobs] = useState<OcrJob[]>([]);
-  const [ocrDebugJson, setOcrDebugJson] = useState<string | null>(null);
+  const [processedExport, setProcessedExport] =
+    useState<OcrSalesExportResponse | null>(null);
   const [isRunningOcr, setIsRunningOcr] = useState(false);
 
-  const [isCreatingExport, setIsCreatingExport] = useState(false);
   const [isSavingClient, setIsSavingClient] = useState(false);
   const [isSavingUser, setIsSavingUser] = useState(false);
   const [isDeletingClient, setIsDeletingClient] = useState(false);
@@ -807,45 +820,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     }
   }
 
-  async function handleCreateExport(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!token || !selectedClientId) {
-      return;
-    }
-
-    setIsCreatingExport(true);
-
-    try {
-      const created = await request<ClientExport>(
-        `/clients/${selectedClientId}/exports`,
-        token,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            ...(exportForm.dateFrom ? { date_from: exportForm.dateFrom } : {}),
-            ...(exportForm.dateTo ? { date_to: exportForm.dateTo } : {}),
-          }),
-        },
-      );
-
-      setExports((previous) => [created, ...previous]);
-      setExportForm({});
-      setSaleImages([]);
-      setSaleImagesError(null);
-      setIsClientSaleModalOpen(false);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to create sale export";
-      appToast.error({
-        title: "Unable to create sale export",
-        description: message,
-      });
-    } finally {
-      setIsCreatingExport(false);
-    }
-  }
-
-  async function handleRunOcrDebug() {
+  async function handleProcessSales() {
     if (!token || !selectedClientId) {
       return;
     }
@@ -860,6 +835,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     }
 
     setIsRunningOcr(true);
+    setProcessedExport(null);
 
     try {
       const formData = new FormData();
@@ -867,51 +843,95 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         formData.append("images", image);
       }
 
-      const enqueueResponse = await fetch(
-        `${API_BASE_URL}/clients/${selectedClientId}/ocr-debug`,
+      const parent = await request<OcrParentSubmissionResponse>(
+        `/clients/${selectedClientId}/ocr`,
+        token,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
           body: formData,
         },
       );
 
-      if (!enqueueResponse.ok) {
-        const message = await enqueueResponse.text();
-        throw new Error(message || "Unable to enqueue OCR task");
-      }
-
-      const queued = (await enqueueResponse.json()) as OcrEnqueueResponse;
-      setOcrJobs((previous) => upsertOcrJobs(previous, queued.jobs));
-
-      let latest: OcrSubmissionResponse | null = null;
-      for (let attempt = 0; attempt < 60; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 1500));
-        latest = await request<OcrSubmissionResponse>(
-          `/ocr-submissions/${queued.submission_id}`,
+      let latest: OcrParentSubmissionResponse | null = null;
+      for (let attempt = 0; attempt < 180; attempt += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        latest = await request<OcrParentSubmissionResponse>(
+          `/ocr-parent-submissions/${parent.parent_submission_id}`,
           token,
         );
-        setOcrJobs((previous) =>
-          upsertOcrJobs(previous, latest?.results ?? []),
-        );
-        setOcrDebugJson(JSON.stringify(latest, null, 2));
-
         const done = latest.summary.done + latest.summary.failed;
-        if (done >= latest.summary.total_files) {
+        if (done >= latest.summary.total_files || latest.status === "failed") {
           break;
         }
       }
+
+      if (latest) {
+        if (latest.status === "failed") {
+          throw new Error(
+            latest.error_message ||
+              "One or more OCR jobs failed before export.",
+          );
+        }
+
+        const exported = await request<OcrSalesExportResponse>(
+          `/ocr-parent-submissions/${latest.parent_submission_id}/export-xlsx`,
+          token,
+          {
+            method: "POST",
+          },
+        );
+        setProcessedExport(exported);
+        appToast.success({
+          title: "Sales processed successfully",
+          description: "File is ready to download.",
+        });
+      }
     } catch (error) {
       const message =
-        error instanceof Error ? error.message : "Unable to run OCR debug";
+        error instanceof Error ? error.message : "Unable to process sales";
       appToast.error({
-        title: "OCR debug failed",
+        title: "Process sales failed",
         description: message,
       });
     } finally {
       setIsRunningOcr(false);
+    }
+  }
+
+  async function handleDownloadProcessedFile() {
+    if (!token || !processedExport) {
+      return;
+    }
+
+    try {
+      const response = await fetch(
+        `${API_BASE_URL}${processedExport.download_path}`,
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        },
+      );
+      if (!response.ok) {
+        throw new Error("Unable to download processed sales file");
+      }
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = processedExport.file_name;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.URL.revokeObjectURL(url);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to download file";
+      appToast.error({
+        title: "Download failed",
+        description: message,
+      });
     }
   }
 
@@ -1048,8 +1068,8 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
           </div>
         </section>
 
-        <section className="grid gap-5 lg:grid-cols-[300px_1fr]">
-          <aside className="hidden rounded-3xl border border-border/60 bg-background/80 p-5 shadow-sm backdrop-blur lg:block">
+        <section className="grid gap-5 lg:grid-cols-[300px_1fr] lg:items-start">
+          <aside className="hidden self-start rounded-3xl border border-border/60 bg-background/80 p-5 shadow-sm backdrop-blur lg:sticky lg:top-5 lg:block">
             <h2 className="text-lg font-semibold">Navigation</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Quick access to workspace sections.
@@ -1133,21 +1153,28 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               <div className="space-y-5">
                 <div className="grid gap-2">
                   <Label htmlFor="client-sales-client">Client</Label>
-                  <select
-                    id="client-sales-client"
-                    className="h-10 rounded-md border border-input bg-background px-3 text-sm"
-                    value={selectedClientId ?? ""}
-                    onChange={(event) =>
-                      setSelectedClientId(event.target.value || null)
+                  <Select
+                    value={selectedClientId ?? NO_CLIENT_VALUE}
+                    onValueChange={(value) =>
+                      setSelectedClientId(
+                        value === NO_CLIENT_VALUE ? null : value,
+                      )
                     }
                   >
-                    <option value="">Select client</option>
-                    {clients.map((client) => (
-                      <option key={client.id} value={client.id}>
-                        {client.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="client-sales-client" className="w-full">
+                      <SelectValue placeholder="Select client" />
+                    </SelectTrigger>
+                    <SelectContent position="popper" sideOffset={6}>
+                      <SelectItem value={NO_CLIENT_VALUE}>
+                        Select client
+                      </SelectItem>
+                      {clients.map((client) => (
+                        <SelectItem key={client.id} value={client.id}>
+                          {client.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 <div className="flex justify-end">
@@ -1363,6 +1390,11 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             <DialogTitle>
               {selectedClient ? "Edit Client" : "Add Client"}
             </DialogTitle>
+            <DialogDescription>
+              {selectedClient
+                ? "Update this client's details."
+                : "Enter details to create a new client."}
+            </DialogDescription>
           </DialogHeader>
           <form
             className="grid gap-3"
@@ -1415,6 +1447,11 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>{selectedUser ? "Edit User" : "Add User"}</DialogTitle>
+            <DialogDescription>
+              {selectedUser
+                ? "Update this user's account settings."
+                : "Create a new user account."}
+            </DialogDescription>
           </DialogHeader>
           <form
             className="grid gap-3"
@@ -1448,13 +1485,37 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                 ) : null}
               </div>
             ) : null}
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" {...userForm.register("is_admin")} />
+            <label
+              htmlFor="user-is-admin"
+              className="flex items-center gap-2 text-sm"
+            >
+              <Checkbox
+                id="user-is-admin"
+                checked={userForm.watch("is_admin")}
+                onCheckedChange={(checked) =>
+                  userForm.setValue("is_admin", checked === true, {
+                    shouldDirty: true,
+                    shouldTouch: true,
+                  })
+                }
+              />
               Admin user
             </label>
             {selectedUser ? (
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" {...userForm.register("is_active")} />
+              <label
+                htmlFor="user-is-active"
+                className="flex items-center gap-2 text-sm"
+              >
+                <Checkbox
+                  id="user-is-active"
+                  checked={userForm.watch("is_active") ?? false}
+                  onCheckedChange={(checked) =>
+                    userForm.setValue("is_active", checked === true, {
+                      shouldDirty: true,
+                      shouldTouch: true,
+                    })
+                  }
+                />
                 Active
               </label>
             ) : null}
@@ -1478,7 +1539,6 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         onOpenChange={(open) => {
           setIsClientSaleModalOpen(open);
           if (!open) {
-            setExportForm({});
             setSaleImages([]);
             setSaleImagesError(null);
           }
@@ -1487,8 +1547,11 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add Client Sale</DialogTitle>
+            <DialogDescription>
+              Upload sales images and process them into an export file.
+            </DialogDescription>
           </DialogHeader>
-          <form className="grid gap-3" onSubmit={handleCreateExport}>
+          <form className="grid gap-3">
             <div className="grid gap-2">
               <Label htmlFor="client-sale-images">Images</Label>
               <Input
@@ -1511,45 +1574,27 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               ) : null}
             </div>
             <Button
-              type="submit"
-              disabled={
-                isCreatingExport || !selectedSalesClient || !!saleImagesError
-              }
-            >
-              {isCreatingExport ? (
-                <LoaderCircle className="size-4 animate-spin" />
-              ) : (
-                <ArrowUpRight className="size-4" />
-              )}
-              Add Client Sale
-            </Button>
-            <Button
               type="button"
-              variant="outline"
-              onClick={handleRunOcrDebug}
               disabled={
-                isRunningOcr ||
-                !selectedSalesClient ||
-                !!saleImagesError ||
-                !saleImages.length
+                isRunningOcr || !selectedSalesClient || !!saleImagesError
               }
+              onClick={() => void handleProcessSales()}
             >
               {isRunningOcr ? (
                 <LoaderCircle className="size-4 animate-spin" />
               ) : (
                 <ArrowUpRight className="size-4" />
               )}
-              Run OCR Debug
+              Process Sales
             </Button>
-            {ocrDebugJson ? (
-              <div className="max-h-72 overflow-auto rounded-xl border border-border/70 bg-muted/40 p-3">
-                <p className="mb-2 text-xs font-medium">
-                  Latest OCR Debug JSON
-                </p>
-                <pre className="text-xs whitespace-pre-wrap">
-                  {ocrDebugJson}
-                </pre>
-              </div>
+            {processedExport ? (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => void handleDownloadProcessedFile()}
+              >
+                Download Processed Excel
+              </Button>
             ) : null}
           </form>
         </DialogContent>
