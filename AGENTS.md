@@ -58,6 +58,27 @@ Follow these rules before making changes.
 - Shared, reusable UI belongs in `components/`.
 - Avoid putting business logic directly in deeply nested JSX blocks; extract local components or helper functions when readability drops.
 - Keep server-only logic out of client components.
+- Put shared TypeScript contracts in `types/` (domain entities, API payloads, shared unions/enums).
+- Put reusable stateful behavior in `hooks/`; prefer feature subfolders like `hooks/workspace/`.
+- Put framework-agnostic helpers in `lib/`; use feature subfolders for domain logic (for example `lib/workspace/`).
+- Keep one-off helpers local to a single file only when there is no near-term reuse signal.
+
+## Reusability And Boundaries
+
+- If logic is used by 2 or more files, extract it to `lib/`, `types/`, or `hooks/` instead of duplicating.
+- Do not define shared domain types inside page/component files when they can be imported from `types/`.
+- Do not define generic API request wrappers inside feature components; keep them in `lib/`.
+- Keep formatting, parsing, and transformation helpers out of JSX-heavy files when they can be moved safely.
+
+## File Size And Feature Decomposition
+
+- Avoid monolithic feature files that mix rendering, domain types, API calls, and complex side effects.
+- When a file grows beyond roughly 500 lines or spans multiple concerns, split by responsibility:
+  - UI sections/components -> `components/<feature>/`
+  - Hooks/state orchestration -> `hooks/<feature>/`
+  - Types/contracts -> `types/<feature>.ts`
+  - Pure helpers/constants -> `lib/<feature>/`
+- Prefer incremental extraction with no behavior change before any functional rewrite.
 
 ## App Router Rules
 

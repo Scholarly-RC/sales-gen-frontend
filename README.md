@@ -1,36 +1,97 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sales Gen Frontend
 
-## Getting Started
+Admin workspace frontend for Sales Gen, built with Next.js App Router.
 
-First, run the development server:
+## Stack
+
+- Next.js 16
+- React 19
+- TypeScript
+- Tailwind CSS 4
+- shadcn/ui
+- Biome
+- pnpm
+
+## Run Locally
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
+pnpm install
 pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000`.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Key Scripts
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+pnpm dev
+pnpm lint
+pnpm format
+pnpm build
+```
 
-## Learn More
+## Architecture
 
-To learn more about Next.js, take a look at the following resources:
+The frontend is organized to keep reusable logic out of large UI files.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `app/`
+  - Route entries (`page.tsx`, route segment pages)
+- `components/`
+  - Reusable UI composition and feature UI
+- `components/ui/`
+  - shadcn/ui primitives
+- `hooks/`
+  - Reusable stateful behavior
+- `lib/`
+  - Framework-agnostic helpers and shared client utilities
+- `types/`
+  - Shared TypeScript domain and API contracts
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Workspace Module Map
 
-## Deploy on Vercel
+The workspace feature now follows a hook-first composition model:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `components/workspace/workspace-shell.tsx`
+  - Main composition layer and page-level rendering
+- `types/workspace.ts`
+  - Shared workspace domain/API types
+- `lib/http.ts`
+  - Shared API request wrapper and API error parsing
+- `lib/workspace/*`
+  - Workspace-specific pure utilities and schemas
+- `hooks/workspace/use-workspace-token.ts`
+  - Auth token bootstrap + login redirect
+- `hooks/workspace/use-workspace-data.ts`
+  - Workspace data loading (me/users/clients/exports)
+- `hooks/workspace/use-catalog-data.ts`
+  - Catalog query/pagination/suggestions loading
+- `hooks/workspace/use-catalog-actions.ts`
+  - Catalog CRUD modal/form state + actions
+- `hooks/workspace/use-client-actions.ts`
+  - Client CRUD modal/form state + actions
+- `hooks/workspace/use-user-actions.ts`
+  - User CRUD modal/form state + actions
+- `hooks/workspace/use-client-sales-actions.ts`
+  - Client sales/OCR/export flow + form orchestration
+- `hooks/workspace/use-ocr-jobs.ts`
+  - OCR queue polling/websocket state
+- `hooks/workspace/use-ocr-job-actions.ts`
+  - OCR queue item actions (retry/stop/cleanup)
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Conventions
+
+- Put shared types in `types/`.
+- Put reusable behavior in `hooks/`.
+- Put pure helpers and request utilities in `lib/`.
+- Keep `workspace-shell.tsx` focused on composition and rendering.
+- Prefer incremental refactors with no behavior change.
+
+## Validation
+
+Before merging changes:
+
+```bash
+pnpm lint
+```
+
+Run `pnpm build` only when explicitly needed for release verification.

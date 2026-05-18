@@ -1,31 +1,39 @@
 "use client";
 
+import { format } from "date-fns";
 import {
   ArrowUpRight,
+  BookOpen,
+  CalendarDays,
+  ChevronsUpDown,
   FileOutput,
-  LayoutDashboard,
   LoaderCircle,
-  LogOut,
   Pencil,
   PlusCircle,
   Power,
   RefreshCw,
   Square,
   Trash2,
-  UserRound,
-  Users,
+  View,
   X,
 } from "lucide-react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
-import { z } from "zod";
 
 import { ConfirmationModal } from "@/components/confirmation-modal";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
 import {
   Dialog,
   DialogContent,
@@ -35,6 +43,11 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -52,322 +65,265 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { API_BASE_URL } from "@/lib/api";
-import { clearAuthToken, getStoredAuthToken } from "@/lib/auth";
-import { appToast } from "@/lib/toast";
-
-export type WorkspaceSection =
-  | "dashboard"
-  | "clients"
-  | "client-sales"
-  | "users";
-
-type User = {
-  id: string;
-  email: string;
-  is_active: boolean;
-  is_admin: boolean;
-  can_delete?: boolean;
-  created_at: string;
-};
-
-type Client = {
-  id: string;
-  name: string;
-  company: string | null;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type ClientExport = {
-  id: string;
-  client_id: string;
-  user_id: string;
-  date_from: string | null;
-  date_to: string | null;
-  created_at: string;
-  updated_at: string;
-};
-
-type OcrJobStatus = "queued" | "running" | "failed" | "done" | "stopped";
-
-type OcrJob = {
-  id: string;
-  submission_id: string;
-  client_id: string;
-  user_id: string;
-  queue_message_id: string | null;
-  file_name: string;
-  content_type: string;
-  file_size_bytes: number;
-  status: OcrJobStatus;
-  extracted_text: string | null;
-  raw_ocr: unknown;
-  error_message: string | null;
-  created_at: string;
-  updated_at: string;
-  started_at: string | null;
-  finished_at: string | null;
-};
-
-type OcrParentSubmissionResponse = {
-  parent_submission_id: string;
-  client_id: string;
-  status: "queued" | "running" | "failed" | "done";
-  summary: {
-    total_files: number;
-    total_batches: number;
-    queued: number;
-    running: number;
-    failed: number;
-    done: number;
-  };
-  created_at: string;
-  updated_at: string;
-  finished_at: string | null;
-  error_message: string | null;
-};
-
-type OcrSalesExportResponse = {
-  submission_id?: string;
-  parent_submission_id?: string;
-  file_name: string;
-  download_path: string;
-};
-
-const MAX_IMAGE_FILE_SIZE_BYTES = 2 * 1024 * 1024;
-
-function upsertOcrJobs(current: OcrJob[], updates: OcrJob[]) {
-  const map = new Map(current.map((job) => [job.id, job]));
-  for (const job of updates) {
-    map.set(job.id, job);
-  }
-  return Array.from(map.values()).sort(
-    (a, b) =>
-      new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime(),
-  );
-}
-
-function buildWebSocketUrl(token: string) {
-  const explicit = process.env.NEXT_PUBLIC_API_WS_URL;
-  if (explicit) {
-    const normalized = explicit.endsWith("/")
-      ? explicit.slice(0, -1)
-      : explicit;
-    return `${normalized}/ws/ocr-jobs?token=${encodeURIComponent(token)}`;
-  }
-
-  const proxyTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8000";
-  const wsBase = proxyTarget.replace(/^http/, "ws").replace(/\/$/, "");
-  return `${wsBase}/ws/ocr-jobs?token=${encodeURIComponent(token)}`;
-}
-
-const clientSchema = z.object({
-  name: z.string().trim().min(1, "Name is required"),
-  company: z.string().trim().optional(),
-  notes: z.string().trim().optional(),
-});
-
-type ClientFormValues = z.infer<typeof clientSchema>;
-
-const userSchema = z.object({
-  email: z.string().trim().email("Valid email is required"),
-  password: z
-    .string()
-    .min(8, "Password must be at least 8 characters")
-    .optional(),
-  is_admin: z.boolean(),
-  is_active: z.boolean().optional(),
-});
-
-type UserFormValues = z.infer<typeof userSchema>;
-
-function formatDate(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(value));
-}
+import { Textarea } from "@/components/ui/textarea";
+import { DashboardItems } from "@/components/workspace/dashboard-items";
+import { WorkspaceNav } from "@/components/workspace/workspace-nav";
+import { useCatalogActions } from "@/hooks/workspace/use-catalog-actions";
+import { useCatalogData } from "@/hooks/workspace/use-catalog-data";
+import { useClientActions } from "@/hooks/workspace/use-client-actions";
+import {
+  EXPENSE_TYPE_OPTIONS,
+  useClientExpenseActions,
+  VAT_STATUS_OPTIONS,
+} from "@/hooks/workspace/use-client-expense-actions";
+import { useClientSalesActions } from "@/hooks/workspace/use-client-sales-actions";
+import { useOcrJobActions } from "@/hooks/workspace/use-ocr-job-actions";
+import { useOcrJobs } from "@/hooks/workspace/use-ocr-jobs";
+import { useUserActions } from "@/hooks/workspace/use-user-actions";
+import { useWorkspaceData } from "@/hooks/workspace/use-workspace-data";
+import { useWorkspaceToken } from "@/hooks/workspace/use-workspace-token";
+import { clearAuthToken } from "@/lib/auth";
+import { apiRequest } from "@/lib/http";
+import { cn } from "@/lib/utils";
+import type { ClientFormValues, UserFormValues } from "@/lib/workspace/schemas";
+import {
+  calculateSaleItemLineTotal,
+  formatDate,
+  formatDiscountDisplay,
+} from "@/lib/workspace/utils";
+import type {
+  ClientExpenseType,
+  ClientExport,
+  WorkspaceSection,
+} from "@/types/workspace";
 
 async function request<T>(
   path: string,
   token: string,
   init?: RequestInit,
 ): Promise<T> {
-  const headers: HeadersInit = {
-    Authorization: `Bearer ${token}`,
-    ...(init?.headers ?? {}),
-  };
-  if (!(init?.body instanceof FormData)) {
-    headers["Content-Type"] = "application/json";
-  }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    let detail = "Request failed";
-
-    try {
-      const body = await response.json();
-      if (typeof body?.detail === "string") {
-        detail = body.detail;
-      } else if (Array.isArray(body?.detail)) {
-        detail = body.detail
-          .map((issue: { msg?: string }) => issue?.msg)
-          .filter(Boolean)
-          .join(", ");
-      } else if (typeof body?.message === "string") {
-        detail = body.message;
-      }
-    } catch {
-      detail = `${response.status} ${response.statusText}`;
-    }
-
-    throw new Error(detail);
-  }
-
-  if (response.status === 204) {
-    return undefined as T;
-  }
-
-  return response.json() as Promise<T>;
+  return apiRequest<T>(path, { token, init });
 }
-
-const sidebarItems = [
-  {
-    label: "Dashboard",
-    href: "/workspace/dashboard",
-    key: "dashboard" as const,
-    icon: LayoutDashboard,
-  },
-  {
-    label: "Clients",
-    href: "/workspace/clients",
-    key: "clients" as const,
-    icon: UserRound,
-  },
-  {
-    label: "Client Sales",
-    href: "/workspace/client-sales",
-    key: "client-sales" as const,
-    icon: FileOutput,
-  },
-  {
-    label: "Users",
-    href: "/workspace/users",
-    key: "users" as const,
-    icon: Users,
-  },
-];
 
 const NO_CLIENT_VALUE = "__none__";
+const ACTIVE_DATE_STORAGE_KEY = "sales-gen-active-date";
+const PREVIEW_TOTAL_LABELS = new Set([
+  "total sales from order slip",
+  "total summary of sales",
+  "total discount",
+  "variance",
+]);
 
-function WorkspaceNav({ section }: { section: WorkspaceSection }) {
-  return (
-    <nav className="grid gap-2" aria-label="Workspace navigation">
-      {sidebarItems.map((item) => {
-        const Icon = item.icon;
-
-        return (
-          <Button
-            key={item.label}
-            type="button"
-            variant={item.key === section ? "secondary" : "ghost"}
-            className="w-full justify-start"
-            asChild
-          >
-            <Link href={item.href}>
-              <Icon className="size-4" />
-              {item.label}
-            </Link>
-          </Button>
-        );
-      })}
-    </nav>
-  );
+function toPreviewTotalLabel(value: string) {
+  return value.trim().toLowerCase();
 }
 
-function DashboardItems({
-  clients,
-  salesRecords,
-  users,
-}: {
-  clients: Client[];
-  salesRecords: ClientExport[];
-  users: User[];
-}) {
-  const activeUsers = users.filter((user) => user.is_active).length;
-
-  const cards = [
-    { label: "Total Clients", value: clients.length.toString() },
-    { label: "Total Client Sales", value: salesRecords.length.toString() },
-    { label: "Total Users", value: users.length.toString() },
-    { label: "Active Users", value: activeUsers.toString() },
-  ];
-
-  return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-      {cards.map((card) => (
-        <div
-          key={card.label}
-          className="rounded-xl border border-border/70 bg-background p-4"
-        >
-          <p className="text-sm text-muted-foreground">{card.label}</p>
-          <p className="mt-1 text-2xl font-semibold">{card.value}</p>
-        </div>
-      ))}
-    </div>
-  );
+function parsePreviewNumber(value: string | number | null | undefined) {
+  if (typeof value === "number") {
+    return Number.isFinite(value) ? value : null;
+  }
+  if (typeof value !== "string") {
+    return null;
+  }
+  const normalized = value.replaceAll(",", "").trim();
+  if (!normalized) {
+    return null;
+  }
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
 }
+
+function getPreviewTotalValue(row: Array<string | number>) {
+  for (let index = row.length - 1; index >= 0; index -= 1) {
+    const parsed = parsePreviewNumber(row[index]);
+    if (parsed !== null) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+function normalizeColumnLabel(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function getPreviewColumnWidthClass(column: string) {
+  const normalized = normalizeColumnLabel(column);
+  if (normalized === "item") return "w-[280px] min-w-[280px]";
+  if (normalized === "quantity") return "w-[110px] min-w-[110px]";
+  if (normalized === "unit price") return "w-[130px] min-w-[130px]";
+  if (normalized === "line total") return "w-[140px] min-w-[140px]";
+  return "w-[150px] min-w-[150px]";
+}
+
+const EXPENSE_TYPE_LABELS: Record<string, string> = Object.fromEntries(
+  EXPENSE_TYPE_OPTIONS.map((entry) => [entry.value, entry.label]),
+) as Record<ClientExpenseType, string>;
 
 export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
   const router = useRouter();
+  const [activeDate, setActiveDate] = useState("");
+  const [isActiveDatePopoverOpen, setIsActiveDatePopoverOpen] = useState(false);
+  const [isSalesFilterPopoverOpen, setIsSalesFilterPopoverOpen] =
+    useState(false);
 
-  const [token, setToken] = useState<string | null>(null);
-  const [user, setUser] = useState<User | null>(null);
-  const [users, setUsers] = useState<User[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
-  const [exports, setExports] = useState<ClientExport[]>([]);
+  const token = useWorkspaceToken();
+  const [isClientSaleOcrModalOpen, setIsClientSaleOcrModalOpen] =
+    useState(false);
+  const [isClientSalesExportModalOpen, setIsClientSalesExportModalOpen] =
+    useState(false);
+  const [isClientSalesPreviewModalOpen, setIsClientSalesPreviewModalOpen] =
+    useState(false);
+  const [isClientExpensesExportModalOpen, setIsClientExpensesExportModalOpen] =
+    useState(false);
+  const [
+    isClientExpensesPreviewModalOpen,
+    setIsClientExpensesPreviewModalOpen,
+  ] = useState(false);
+  const [activePreviewSheetName, setActivePreviewSheetName] = useState("");
+  const [isCatalogCategoriesModalOpen, setIsCatalogCategoriesModalOpen] =
+    useState(false);
+  const [selectedSalePreview, setSelectedSalePreview] =
+    useState<ClientExport | null>(null);
 
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
-  const [selectedUser, setSelectedUser] = useState<User | null>(null);
-  const [isClientModalOpen, setIsClientModalOpen] = useState(false);
-  const [isUserModalOpen, setIsUserModalOpen] = useState(false);
-  const [isClientSaleModalOpen, setIsClientSaleModalOpen] = useState(false);
-  const [isDeleteClientModalOpen, setIsDeleteClientModalOpen] = useState(false);
-  const [clientPendingDelete, setClientPendingDelete] = useState<Client | null>(
-    null,
-  );
+  const [activeItemSuggestionRowId, setActiveItemSuggestionRowId] = useState<
+    string | null
+  >(null);
 
-  const [saleImages, setSaleImages] = useState<File[]>([]);
-  const [saleImagesError, setSaleImagesError] = useState<string | null>(null);
-  const [ocrJobs, setOcrJobs] = useState<OcrJob[]>([]);
-  const [processedExport, setProcessedExport] =
-    useState<OcrSalesExportResponse | null>(null);
-  const [isRunningOcr, setIsRunningOcr] = useState(false);
+  const handleAuthFailure = useCallback(() => {
+    clearAuthToken();
+    router.replace("/login");
+  }, [router]);
 
-  const [isSavingClient, setIsSavingClient] = useState(false);
-  const [isSavingUser, setIsSavingUser] = useState(false);
-  const [isDeletingClient, setIsDeletingClient] = useState(false);
+  const {
+    user,
+    users,
+    clients,
+    selectedClientId,
+    exports,
+    isLoadingWorkspace,
+    isLoadingExports,
+    usersLoadError,
+    setUsers,
+    setClients,
+    setSelectedClientId,
+    refreshExports,
+  } = useWorkspaceData({
+    token,
+    section,
+    request,
+    onAuthFailure: handleAuthFailure,
+  });
 
-  const [isLoadingWorkspace, setIsLoadingWorkspace] = useState(false);
-  const [isLoadingExports, setIsLoadingExports] = useState(false);
-  const [userFormError, setUserFormError] = useState<string | null>(null);
-  const [usersLoadError, setUsersLoadError] = useState<string | null>(null);
+  const {
+    catalogItems,
+    catalogCategories,
+    catalogCategoriesPageRows,
+    catalogSearch,
+    catalogPage,
+    catalogTotalPages,
+    catalogTotalItems,
+    categoriesPage,
+    categoriesTotalPages,
+    categoriesTotalItems,
+    isLoadingCategoriesPage,
+    catalogItemSuggestions,
+    suggestionQuery,
+    isLoadingCatalogItems,
+    catalogLoadError,
+    setCatalogItems,
+    setCatalogCategories,
+    setCatalogSearch,
+    setCatalogPage,
+    setCategoriesPage,
+    setCatalogItemSuggestions,
+    setSuggestionQuery,
+    setCatalogLoadError,
+    loadCatalogItems,
+    loadCatalogCategories,
+    loadCatalogCategoriesPage,
+  } = useCatalogData({
+    token,
+    section,
+    selectedClientId,
+    isCatalogCategoriesModalOpen,
+    activeItemSuggestionRowId,
+    request,
+  });
 
-  const activeQueueCount = useMemo(
-    () =>
-      ocrJobs.filter(
-        (job) => job.status === "queued" || job.status === "running",
-      ).length,
-    [ocrJobs],
-  );
+  const {
+    selectedCatalogItem,
+    isCatalogItemModalOpen,
+    isCategoryComboboxOpen,
+    isDeleteCatalogItemModalOpen,
+    isDeleteCategoryModalOpen,
+    catalogItemPendingDelete,
+    categoryPendingDelete,
+    isSavingCatalogItem,
+    isDeletingCatalogItem,
+    isSavingCategory,
+    isDeletingCategory,
+    catalogItemFormError,
+    catalogItemForm,
+    categoryFormName,
+    categoryFormError,
+    selectedCategory,
+    selectedCatalogCategoryLabel,
+    setIsCatalogItemModalOpen,
+    setIsCategoryComboboxOpen,
+    setIsDeleteCatalogItemModalOpen,
+    setIsDeleteCategoryModalOpen,
+    setCatalogItemPendingDelete,
+    setCategoryPendingDelete,
+    setCatalogItemFormError,
+    setCatalogItemForm,
+    setCategoryFormName,
+    setCategoryFormError,
+    setSelectedCategory,
+    openCatalogItemCreateModal,
+    openCatalogItemEditModal,
+    handleSaveCatalogItem,
+    handleCreateOrUpdateCategory,
+    handleDeleteCategory,
+    openDeleteCatalogItemModal,
+    handleDeleteCatalogItem,
+  } = useCatalogActions({
+    token,
+    selectedClientId,
+    catalogItems,
+    catalogCategories,
+    catalogSearch,
+    catalogPage,
+    categoriesPage,
+    isCatalogCategoriesModalOpen,
+    setIsCatalogCategoriesModalOpen,
+    request,
+    setCatalogPage,
+    loadCatalogItems,
+    loadCatalogCategories,
+    loadCatalogCategoriesPage,
+  });
+
+  const {
+    ocrJobs,
+    isOcrQueueHidden,
+    activeQueueCount,
+    setOcrJobs,
+    setIsOcrQueueHidden,
+  } = useOcrJobs({
+    token,
+    request,
+  });
+
+  const {
+    handleRetryFailedOcrJob,
+    handleStopQueuedOcrJob,
+    handleRemoveFinishedOcrJobs,
+  } = useOcrJobActions({
+    token,
+    request,
+    setOcrJobs,
+  });
 
   const clientForm = useForm<ClientFormValues>({
     defaultValues: {
@@ -386,20 +342,426 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     },
   });
 
-  useEffect(() => {
-    const storedToken = getStoredAuthToken();
-    if (!storedToken) {
-      router.replace("/login");
-      return;
-    }
+  const {
+    selectedClient,
+    isClientModalOpen,
+    isDeleteClientModalOpen,
+    clientPendingDelete,
+    isSavingClient,
+    isDeletingClient,
+    setIsClientModalOpen,
+    setIsDeleteClientModalOpen,
+    setClientPendingDelete,
+    openClientCreateModal,
+    openClientEditModal,
+    submitClientForm,
+    openDeleteClientModal,
+    handleDeleteClient,
+  } = useClientActions({
+    token,
+    request,
+    clientForm,
+    setClients,
+    setSelectedClientId,
+  });
 
-    setToken(storedToken);
-  }, [router]);
+  const {
+    selectedUser,
+    isUserModalOpen,
+    isSavingUser,
+    userFormError,
+    setIsUserModalOpen,
+    setUserFormError,
+    openUserCreateModal,
+    openUserEditModal,
+    submitUserForm,
+    handleDeleteUser,
+    handleActivateUser,
+  } = useUserActions({
+    token,
+    request,
+    userForm,
+    setUsers,
+  });
+
+  const {
+    saleImages,
+    salesFilterDate,
+    saleImagesError,
+    processedExport,
+    isExportingClientSales,
+    isLoadingClientSalesPreview,
+    exportMonth,
+    exportYear,
+    clientSalesPreview,
+    isRunningOcr,
+    saleDate,
+    saleTransactionPeriod,
+    saleDiscountType,
+    saleDiscountValue,
+    saleNotes,
+    saleItems,
+    isSavingClientSale,
+    isClientSaleModalOpen,
+    dailySummarySalesInput,
+    isSavingDailySummarySales,
+    editingSaleId,
+    saleItemsSubtotal,
+    saleDiscountAmount,
+    saleItemsGrandTotal,
+    filteredExports,
+    filteredItemSuggestions,
+    setSalesFilterDate,
+    setExportMonth,
+    setExportYear,
+    setSaleDate,
+    setSaleTransactionPeriod,
+    setSaleDiscountType,
+    setSaleDiscountValue,
+    setSaleNotes,
+    setSaleItems,
+    setDailySummarySalesInput,
+    setIsClientSaleModalOpen,
+    handleProcessSales,
+    addSaleItem,
+    updateSaleItem,
+    removeSaleItem,
+    resetClientSaleForm,
+    openEditClientSaleModal,
+    handleSubmitClientSaleForm,
+    handleDownloadProcessedFile,
+    handleExportClientSalesByMonth,
+    handlePreviewClientSalesByMonth,
+    handleSaveDailySummarySales,
+    setClientSalesPreview,
+    handleSaleImagesChange,
+  } = useClientSalesActions({
+    token,
+    selectedClientId,
+    request,
+    exports,
+    refreshExports,
+    catalogItemSuggestions,
+    setCatalogItemSuggestions,
+    setSuggestionQuery,
+    setActiveItemSuggestionRowId,
+  });
+  const {
+    isLoadingExpenses,
+    isExpenseModalOpen,
+    selectedExpense,
+    isSavingExpense,
+    isDeletingExpense,
+    expensePendingDelete,
+    isDeleteExpenseModalOpen,
+    expenseDate,
+    expenseLines,
+    expensePreviewMonth,
+    expensePreviewYear,
+    expensePreviewRows,
+    expensePreviewColumns,
+    expensePreviewTotalsRow,
+    expenseFilterDate,
+    isLoadingClientExpensesPreview,
+    isExportingClientExpenses,
+    filteredExpenses,
+    setIsExpenseModalOpen,
+    setExpensePendingDelete,
+    setIsDeleteExpenseModalOpen,
+    setExpenseDate,
+    setExpensePreviewMonth,
+    setExpensePreviewYear,
+    setExpenseFilterDate,
+    resetExpenseForm,
+    openCreateExpenseModal,
+    openEditExpenseModal,
+    addExpenseLine,
+    updateExpenseLine,
+    removeExpenseLine,
+    handleSaveExpense,
+    handleDeleteExpense,
+    handlePreviewClientExpensesByMonth,
+    handleExportClientExpensesByMonth,
+  } = useClientExpenseActions({
+    token,
+    section,
+    selectedClientId,
+    request,
+  });
 
   const selectedSalesClient = useMemo(
     () => clients.find((entry) => entry.id === selectedClientId) ?? null,
     [clients, selectedClientId],
   );
+  const activePreviewSheet = useMemo(() => {
+    if (!clientSalesPreview?.sheets.length) {
+      return null;
+    }
+    return (
+      clientSalesPreview.sheets.find(
+        (sheet) => sheet.name === activePreviewSheetName,
+      ) ?? clientSalesPreview.sheets[0]
+    );
+  }, [activePreviewSheetName, clientSalesPreview]);
+  const activePreviewSheetRows = useMemo(() => {
+    if (!activePreviewSheet) {
+      return { lineRows: [], totalRows: [] } as const;
+    }
+
+    const lineRows: Array<Array<string | number>> = [];
+    const totalRows: Array<Array<string | number>> = [];
+
+    for (const row of activePreviewSheet.rows) {
+      const hasTotalLabel = row.some((cell) => {
+        if (typeof cell !== "string") {
+          return false;
+        }
+        return PREVIEW_TOTAL_LABELS.has(cell.trim().toLowerCase());
+      });
+
+      if (hasTotalLabel) {
+        totalRows.push(row);
+      } else {
+        lineRows.push(row);
+      }
+    }
+
+    return { lineRows, totalRows } as const;
+  }, [activePreviewSheet]);
+  const activePreviewLineTable = useMemo(() => {
+    if (!activePreviewSheet) {
+      return { columns: [], rows: [], originalIndexes: [] } as const;
+    }
+
+    const lineTotalColumnIndex = activePreviewSheet.columns.findIndex(
+      (column) => normalizeColumnLabel(column) === "line total",
+    );
+    const endIndex =
+      lineTotalColumnIndex >= 0
+        ? lineTotalColumnIndex + 1
+        : activePreviewSheet.columns.length;
+
+    const originalIndexes = Array.from(
+      { length: endIndex },
+      (_, index) => index,
+    ).filter((index) => {
+      const label = normalizeColumnLabel(
+        activePreviewSheet.columns[index] ?? "",
+      );
+      return label !== "sale id" && label !== "period";
+    });
+    const columns = originalIndexes.map(
+      (index) => activePreviewSheet.columns[index],
+    );
+    const rows = activePreviewSheetRows.lineRows.map((row) =>
+      originalIndexes.map((index) => row[index]),
+    );
+    return { columns, rows, originalIndexes } as const;
+  }, [activePreviewSheet, activePreviewSheetRows.lineRows]);
+  const activePreviewColumnIndexes = useMemo(() => {
+    if (!activePreviewSheet) {
+      return {
+        period: -1,
+        lineTotal: -1,
+        subtotal: -1,
+        grandTotal: -1,
+        discountType: -1,
+        discountValue: -1,
+        notes: -1,
+      } as const;
+    }
+
+    const columns = activePreviewSheet.columns.map((column) =>
+      normalizeColumnLabel(column),
+    );
+    return {
+      period: columns.indexOf("period"),
+      lineTotal: columns.indexOf("line total"),
+      subtotal: columns.indexOf("subtotal"),
+      grandTotal: columns.indexOf("grand total"),
+      discountType: columns.indexOf("discount type"),
+      discountValue: columns.indexOf("discount value"),
+      notes: columns.indexOf("notes"),
+    } as const;
+  }, [activePreviewSheet]);
+  const previewPeriodGroups = useMemo(() => {
+    const originalIndexes = activePreviewLineTable.originalIndexes;
+    const groups = new Map<
+      string,
+      {
+        label: string;
+        rowsFull: Array<Array<string | number>>;
+        rowsTrimmed: Array<Array<string | number>>;
+      }
+    >();
+
+    for (const row of activePreviewSheetRows.lineRows) {
+      let periodLabel = "Other";
+      if (activePreviewColumnIndexes.period >= 0) {
+        const raw = String(row[activePreviewColumnIndexes.period] ?? "")
+          .trim()
+          .toUpperCase();
+        if (raw === "AM" || raw === "PM") {
+          periodLabel = raw;
+        } else if (raw) {
+          periodLabel = raw;
+        }
+      }
+
+      const existing = groups.get(periodLabel);
+      if (existing) {
+        existing.rowsFull.push(row);
+        existing.rowsTrimmed.push(originalIndexes.map((index) => row[index]));
+      } else {
+        groups.set(periodLabel, {
+          label: periodLabel,
+          rowsFull: [row],
+          rowsTrimmed: [originalIndexes.map((index) => row[index])],
+        });
+      }
+    }
+
+    const preferredOrder = ["AM", "PM"];
+    const ordered = Array.from(groups.entries()).sort((a, b) => {
+      const left = preferredOrder.indexOf(a[0]);
+      const right = preferredOrder.indexOf(b[0]);
+      if (left === -1 && right === -1) return a[0].localeCompare(b[0]);
+      if (left === -1) return 1;
+      if (right === -1) return -1;
+      return left - right;
+    });
+    return ordered.map(([, group]) => group);
+  }, [
+    activePreviewColumnIndexes.period,
+    activePreviewLineTable.originalIndexes,
+    activePreviewSheetRows.lineRows,
+  ]);
+  const activePreviewLineSummary = useMemo(() => {
+    if (!activePreviewSheet) {
+      return {
+        totalSalesFromOrderSlip: null,
+        discountType: null,
+        discountValue: null,
+        totalDiscount: null,
+        notes: null,
+      } as const;
+    }
+
+    let totalSalesFromOrderSlip = 0;
+    let hasLineTotal = false;
+
+    for (const row of activePreviewSheetRows.lineRows) {
+      const lineTotal =
+        activePreviewColumnIndexes.lineTotal >= 0
+          ? parsePreviewNumber(row[activePreviewColumnIndexes.lineTotal])
+          : null;
+      if (lineTotal !== null) {
+        totalSalesFromOrderSlip += lineTotal;
+        hasLineTotal = true;
+      }
+    }
+
+    const firstRow = activePreviewSheetRows.lineRows[0] ?? null;
+    const subtotal =
+      firstRow && activePreviewColumnIndexes.subtotal >= 0
+        ? parsePreviewNumber(firstRow[activePreviewColumnIndexes.subtotal])
+        : null;
+    const grandTotal =
+      firstRow && activePreviewColumnIndexes.grandTotal >= 0
+        ? parsePreviewNumber(firstRow[activePreviewColumnIndexes.grandTotal])
+        : null;
+    const discountType =
+      firstRow && activePreviewColumnIndexes.discountType >= 0
+        ? String(
+            firstRow[activePreviewColumnIndexes.discountType] ?? "",
+          ).trim() || null
+        : null;
+    const discountValue =
+      firstRow && activePreviewColumnIndexes.discountValue >= 0
+        ? parsePreviewNumber(firstRow[activePreviewColumnIndexes.discountValue])
+        : null;
+    const notes =
+      firstRow && activePreviewColumnIndexes.notes >= 0
+        ? String(firstRow[activePreviewColumnIndexes.notes] ?? "").trim() ||
+          null
+        : null;
+    const totalDiscount =
+      subtotal !== null && grandTotal !== null ? subtotal - grandTotal : null;
+
+    return {
+      totalSalesFromOrderSlip: hasLineTotal ? totalSalesFromOrderSlip : null,
+      discountType,
+      discountValue,
+      totalDiscount,
+      notes,
+    } as const;
+  }, [
+    activePreviewColumnIndexes.discountType,
+    activePreviewColumnIndexes.discountValue,
+    activePreviewColumnIndexes.grandTotal,
+    activePreviewColumnIndexes.lineTotal,
+    activePreviewColumnIndexes.notes,
+    activePreviewColumnIndexes.subtotal,
+    activePreviewSheet,
+    activePreviewSheetRows.lineRows,
+  ]);
+  const activePreviewSheetTotals = useMemo(() => {
+    let totalSalesFromOrderSlip: number | null = null;
+    let totalSummaryOfSales: number | null = null;
+    let totalDiscount: number | null = null;
+    let variance: number | null = null;
+
+    for (const row of activePreviewSheetRows.totalRows) {
+      const labelCell = row.find((cell) => typeof cell === "string");
+      if (!labelCell) {
+        continue;
+      }
+      const value = getPreviewTotalValue(row);
+      const label = toPreviewTotalLabel(labelCell);
+
+      if (label === "total sales from order slip") {
+        totalSalesFromOrderSlip = value;
+      } else if (label === "total summary of sales") {
+        totalSummaryOfSales = value;
+      } else if (label === "total discount") {
+        totalDiscount = value;
+      } else if (label === "variance") {
+        variance = value;
+      }
+    }
+
+    return {
+      totalSalesFromOrderSlip:
+        totalSalesFromOrderSlip ??
+        activePreviewLineSummary.totalSalesFromOrderSlip,
+      totalSummaryOfSales,
+      totalDiscount: totalDiscount ?? activePreviewLineSummary.totalDiscount,
+      variance,
+    } as const;
+  }, [activePreviewLineSummary, activePreviewSheetRows.totalRows]);
+  const manualSummaryOfSales = useMemo(
+    () => parsePreviewNumber(dailySummarySalesInput),
+    [dailySummarySalesInput],
+  );
+  const computedVariance = useMemo(() => {
+    if (
+      activePreviewSheetTotals.totalSalesFromOrderSlip === null ||
+      activePreviewSheetTotals.totalDiscount === null ||
+      manualSummaryOfSales === null
+    ) {
+      return null;
+    }
+
+    return (
+      manualSummaryOfSales +
+      activePreviewSheetTotals.totalDiscount -
+      activePreviewSheetTotals.totalSalesFromOrderSlip
+    );
+  }, [
+    activePreviewSheetTotals.totalDiscount,
+    activePreviewSheetTotals.totalSalesFromOrderSlip,
+    manualSummaryOfSales,
+  ]);
   const usersWithCurrent = useMemo(() => {
     if (!user) {
       return users;
@@ -413,621 +775,31 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     return [user, ...users];
   }, [users, user]);
 
-  const loadWorkspace = useCallback(
-    async (accessToken: string) => {
-      setIsLoadingWorkspace(true);
-
-      try {
-        const [me, clientList] = await Promise.all([
-          request<User>("/auth/me", accessToken),
-          request<Client[]>("/clients", accessToken),
-        ]);
-
-        setUser(me);
-        setClients(clientList);
-        setSelectedClientId((previous) => {
-          if (previous && clientList.some((item) => item.id === previous)) {
-            return previous;
-          }
-          return clientList[0]?.id ?? null;
-        });
-        setUsersLoadError(null);
-
-        try {
-          const userList = await request<User[]>("/users", accessToken);
-          setUsers(userList);
-        } catch (error) {
-          setUsers([]);
-          const message =
-            error instanceof Error ? error.message : "Failed to load users";
-          setUsersLoadError(message);
-          appToast.error({
-            title: "Unable to load users",
-            description: message,
-          });
-        }
-      } catch (error) {
-        const message =
-          error instanceof Error ? error.message : "Failed to load workspace";
-        appToast.error({
-          title: "Failed to load workspace",
-          description: message,
-        });
-        clearAuthToken();
-        router.replace("/login");
-      } finally {
-        setIsLoadingWorkspace(false);
-      }
-    },
-    [router],
-  );
-
-  const loadExports = useCallback(
-    async (accessToken: string) => {
-      if (!selectedClientId) {
-        setExports([]);
-        return;
-      }
-
-      setIsLoadingExports(true);
-
-      try {
-        const rows = await request<ClientExport[]>(
-          `/clients/${selectedClientId}/exports`,
-          accessToken,
-        );
-        setExports(rows);
-      } catch {
-        setExports([]);
-      } finally {
-        setIsLoadingExports(false);
-      }
-    },
-    [selectedClientId],
-  );
-
   useEffect(() => {
-    if (!token) {
-      return;
-    }
-
-    loadWorkspace(token);
-  }, [token, loadWorkspace]);
-
-  useEffect(() => {
-    if (!token || section !== "client-sales") {
-      return;
-    }
-
-    loadExports(token);
-  }, [token, section, loadExports]);
-
-  const loadOcrJobs = useCallback(async (accessToken: string) => {
-    try {
-      const rows = await request<OcrJob[]>("/ocr-jobs", accessToken);
-      setOcrJobs(rows);
-    } catch {
-      setOcrJobs([]);
-    }
+    const defaultDate = format(new Date(), "yyyy-MM-dd");
+    const storedDate = window.sessionStorage.getItem(ACTIVE_DATE_STORAGE_KEY);
+    setActiveDate(storedDate ?? defaultDate);
   }, []);
 
   useEffect(() => {
-    if (!token) {
+    if (!activeDate) {
       return;
     }
-
-    loadOcrJobs(token);
-  }, [token, loadOcrJobs]);
+    window.sessionStorage.setItem(ACTIVE_DATE_STORAGE_KEY, activeDate);
+  }, [activeDate]);
 
   useEffect(() => {
-    if (!token) {
+    if (!activeDate) {
       return;
     }
-
-    const socket = new WebSocket(buildWebSocketUrl(token));
-
-    socket.onmessage = (event) => {
-      try {
-        const payload = JSON.parse(event.data) as {
-          type?: string;
-          job?: OcrJob;
-        };
-
-        if (payload.type === "job_update" && payload.job) {
-          setOcrJobs((previous) =>
-            upsertOcrJobs(previous, [payload.job as OcrJob]),
-          );
-        }
-      } catch {
-        // Ignore non-JSON heartbeat messages.
-      }
-    };
-
-    return () => {
-      socket.close();
-    };
-  }, [token]);
+    setSalesFilterDate(new Date(`${activeDate}T00:00:00`));
+    setExpenseFilterDate(new Date(`${activeDate}T00:00:00`));
+  }, [activeDate, setExpenseFilterDate, setSalesFilterDate]);
 
   function handleLogout() {
     clearAuthToken();
     router.replace("/login");
     router.refresh();
-  }
-
-  function openClientCreateModal() {
-    setSelectedClient(null);
-    clientForm.reset({ name: "", company: "", notes: "" });
-    setIsClientModalOpen(true);
-  }
-
-  function openClientEditModal(client: Client) {
-    setSelectedClient(client);
-    clientForm.reset({
-      name: client.name,
-      company: client.company || "",
-      notes: client.notes || "",
-    });
-    setIsClientModalOpen(true);
-  }
-
-  async function submitClientForm(values: ClientFormValues) {
-    if (!token) {
-      return;
-    }
-
-    const parsed = clientSchema.safeParse(values);
-    if (!parsed.success) {
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0] as keyof ClientFormValues;
-        clientForm.setError(field, { message: issue.message });
-      }
-      return;
-    }
-
-    setIsSavingClient(true);
-
-    try {
-      if (selectedClient) {
-        const updated = await request<Client>(
-          `/clients/${selectedClient.id}`,
-          token,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              name: parsed.data.name,
-              company: parsed.data.company || null,
-              notes: parsed.data.notes || null,
-            }),
-          },
-        );
-
-        setClients((previous) =>
-          previous.map((client) =>
-            client.id === updated.id ? updated : client,
-          ),
-        );
-      } else {
-        const created = await request<Client>("/clients", token, {
-          method: "POST",
-          body: JSON.stringify({
-            name: parsed.data.name,
-            company: parsed.data.company || null,
-            notes: parsed.data.notes || null,
-          }),
-        });
-
-        setClients((previous) => [created, ...previous]);
-      }
-
-      setIsClientModalOpen(false);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to save client";
-      appToast.error({
-        title: "Unable to save client",
-        description: message,
-      });
-    } finally {
-      setIsSavingClient(false);
-    }
-  }
-
-  function openDeleteClientModal(client: Client) {
-    setClientPendingDelete(client);
-    setIsDeleteClientModalOpen(true);
-  }
-
-  async function handleDeleteClient() {
-    if (!token) {
-      return;
-    }
-
-    if (!clientPendingDelete) {
-      return;
-    }
-
-    const client = clientPendingDelete;
-    setIsDeletingClient(true);
-
-    try {
-      const linkedSales = await request<ClientExport[]>(
-        `/clients/${client.id}/exports`,
-        token,
-      );
-
-      if (linkedSales.length > 0) {
-        appToast.error({
-          title: "Unable to delete client",
-          description:
-            "Client cannot be deleted because it is referenced by client sales.",
-        });
-        return;
-      }
-
-      await request<void>(`/clients/${client.id}`, token, { method: "DELETE" });
-      setClients((previous) =>
-        previous.filter((entry) => entry.id !== client.id),
-      );
-      setSelectedClientId((previous) =>
-        previous === client.id ? null : previous,
-      );
-      setClientPendingDelete(null);
-      setIsDeleteClientModalOpen(false);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to delete client";
-      appToast.error({
-        title: "Unable to delete client",
-        description: message,
-      });
-    } finally {
-      setIsDeletingClient(false);
-    }
-  }
-
-  function openUserCreateModal() {
-    setSelectedUser(null);
-    setUserFormError(null);
-    userForm.reset({
-      email: "",
-      password: "",
-      is_admin: false,
-      is_active: true,
-    });
-    setIsUserModalOpen(true);
-  }
-
-  function openUserEditModal(nextUser: User) {
-    setSelectedUser(nextUser);
-    setUserFormError(null);
-    userForm.reset({
-      email: nextUser.email,
-      password: "",
-      is_admin: nextUser.is_admin,
-      is_active: nextUser.is_active,
-    });
-    setIsUserModalOpen(true);
-  }
-
-  async function submitUserForm(values: UserFormValues) {
-    if (!token) {
-      return;
-    }
-
-    setUserFormError(null);
-
-    if (!selectedUser && !values.password) {
-      userForm.setError("password", {
-        message: "Password is required for new users",
-      });
-      return;
-    }
-
-    const parsed = userSchema.safeParse(values);
-    if (!parsed.success) {
-      for (const issue of parsed.error.issues) {
-        const field = issue.path[0] as keyof UserFormValues;
-        userForm.setError(field, { message: issue.message });
-      }
-      return;
-    }
-
-    setIsSavingUser(true);
-
-    try {
-      if (selectedUser) {
-        const updated = await request<User>(
-          `/users/${selectedUser.id}`,
-          token,
-          {
-            method: "PUT",
-            body: JSON.stringify({
-              email: parsed.data.email,
-              is_admin: parsed.data.is_admin,
-              is_active: parsed.data.is_active ?? true,
-            }),
-          },
-        );
-
-        setUsers((previous) =>
-          previous.map((entry) => (entry.id === updated.id ? updated : entry)),
-        );
-      } else {
-        const created = await request<User>("/users", token, {
-          method: "POST",
-          body: JSON.stringify({
-            email: parsed.data.email,
-            password: parsed.data.password,
-            is_admin: parsed.data.is_admin,
-          }),
-        });
-
-        setUsers((previous) => [created, ...previous]);
-      }
-
-      setIsUserModalOpen(false);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to save user";
-      setUserFormError(message);
-      appToast.error({
-        title: "Unable to save user",
-        description: message,
-      });
-    } finally {
-      setIsSavingUser(false);
-    }
-  }
-
-  async function handleDeleteUser(userId: string) {
-    if (!token) {
-      return;
-    }
-
-    try {
-      await request<void>(`/users/${userId}`, token, { method: "DELETE" });
-      setUsers((previous) => previous.filter((entry) => entry.id !== userId));
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to delete user";
-      appToast.error({
-        title: "Unable to delete user",
-        description: message,
-      });
-    }
-  }
-
-  async function handleActivateUser(userId: string) {
-    if (!token) {
-      return;
-    }
-
-    try {
-      const updated = await request<User>(`/users/${userId}/activate`, token, {
-        method: "POST",
-      });
-
-      setUsers((previous) =>
-        previous.map((entry) => (entry.id === updated.id ? updated : entry)),
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to activate user";
-      appToast.error({
-        title: "Unable to activate user",
-        description: message,
-      });
-    }
-  }
-
-  async function handleProcessSales() {
-    if (!token || !selectedClientId) {
-      return;
-    }
-
-    if (!saleImages.length) {
-      setSaleImagesError("Select at least one image.");
-      return;
-    }
-
-    if (saleImagesError) {
-      return;
-    }
-
-    setIsRunningOcr(true);
-    setProcessedExport(null);
-
-    try {
-      const formData = new FormData();
-      for (const image of saleImages) {
-        formData.append("images", image);
-      }
-
-      const parent = await request<OcrParentSubmissionResponse>(
-        `/clients/${selectedClientId}/ocr`,
-        token,
-        {
-          method: "POST",
-          body: formData,
-        },
-      );
-
-      let latest: OcrParentSubmissionResponse | null = null;
-      for (let attempt = 0; attempt < 180; attempt += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-        latest = await request<OcrParentSubmissionResponse>(
-          `/ocr-parent-submissions/${parent.parent_submission_id}`,
-          token,
-        );
-        const done = latest.summary.done + latest.summary.failed;
-        if (done >= latest.summary.total_files || latest.status === "failed") {
-          break;
-        }
-      }
-
-      if (latest) {
-        if (latest.status === "failed") {
-          throw new Error(
-            latest.error_message ||
-              "One or more OCR jobs failed before export.",
-          );
-        }
-
-        const exported = await request<OcrSalesExportResponse>(
-          `/ocr-parent-submissions/${latest.parent_submission_id}/export-xlsx`,
-          token,
-          {
-            method: "POST",
-          },
-        );
-        setProcessedExport(exported);
-        appToast.success({
-          title: "Sales processed successfully",
-          description: "File is ready to download.",
-        });
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to process sales";
-      appToast.error({
-        title: "Process sales failed",
-        description: message,
-      });
-    } finally {
-      setIsRunningOcr(false);
-    }
-  }
-
-  async function handleDownloadProcessedFile() {
-    if (!token || !processedExport) {
-      return;
-    }
-
-    try {
-      const response = await fetch(
-        `${API_BASE_URL}${processedExport.download_path}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-      if (!response.ok) {
-        throw new Error("Unable to download processed sales file");
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = processedExport.file_name;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to download file";
-      appToast.error({
-        title: "Download failed",
-        description: message,
-      });
-    }
-  }
-
-  async function handleRetryFailedOcrJob(jobId: string) {
-    if (!token) {
-      return;
-    }
-
-    try {
-      const updated = await request<OcrJob>(`/ocr-jobs/${jobId}/retry`, token, {
-        method: "POST",
-      });
-      setOcrJobs((previous) => upsertOcrJobs(previous, [updated]));
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to retry OCR task";
-      appToast.error({
-        title: "OCR retry failed",
-        description: message,
-      });
-    }
-  }
-
-  async function handleStopQueuedOcrJob(jobId: string) {
-    if (!token) {
-      return;
-    }
-
-    try {
-      const updated = await request<OcrJob>(`/ocr-jobs/${jobId}/stop`, token, {
-        method: "POST",
-      });
-      setOcrJobs((previous) => upsertOcrJobs(previous, [updated]));
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to stop OCR job";
-      appToast.error({
-        title: "Stop OCR job failed",
-        description: message,
-      });
-    }
-  }
-
-  async function handleRemoveFinishedOcrJobs() {
-    if (!token) {
-      return;
-    }
-
-    try {
-      await request<void>("/ocr-jobs/finished", token, {
-        method: "DELETE",
-      });
-      setOcrJobs((previous) =>
-        previous.filter(
-          (entry) => entry.status === "queued" || entry.status === "running",
-        ),
-      );
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Unable to remove finished OCR jobs";
-      appToast.error({
-        title: "Remove finished failed",
-        description: message,
-      });
-    }
-  }
-
-  function handleSaleImagesChange(event: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(event.target.files ?? []);
-
-    if (!files.length) {
-      setSaleImages([]);
-      setSaleImagesError(null);
-      return;
-    }
-
-    const hasNonImage = files.some((file) => !file.type.startsWith("image/"));
-    if (hasNonImage) {
-      setSaleImages([]);
-      setSaleImagesError("Only image files are allowed.");
-      return;
-    }
-
-    const hasOversizedFile = files.some(
-      (file) => file.size > MAX_IMAGE_FILE_SIZE_BYTES,
-    );
-    if (hasOversizedFile) {
-      setSaleImages([]);
-      setSaleImagesError("Each image must be 2MB or smaller.");
-      return;
-    }
-
-    setSaleImages(files);
-    setSaleImagesError(null);
   }
 
   const pageTitle =
@@ -1037,7 +809,33 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         ? "Clients"
         : section === "client-sales"
           ? "Client Sales"
-          : "Users";
+          : section === "client-expenses"
+            ? "Client Expenses"
+            : section === "catalog"
+              ? "Catalog"
+              : "Users";
+
+  function handleClientChange(value: string) {
+    setSelectedClientId(value === NO_CLIENT_VALUE ? null : value);
+    setCatalogItems([]);
+    setCatalogCategories([]);
+    setCatalogLoadError(null);
+    setCatalogSearch("");
+    setCatalogPage(1);
+    setCatalogTotalPages(1);
+    setCatalogTotalItems(0);
+  }
+
+  function handleOpenCreateSaleModal() {
+    resetClientSaleForm();
+    setSaleDate(activeDate);
+    setIsClientSaleModalOpen(true);
+  }
+
+  function handleOpenCreateExpenseModal() {
+    openCreateExpenseModal();
+    setExpenseDate(activeDate);
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-background text-foreground">
@@ -1053,17 +851,73 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                 {pageTitle}
               </h1>
             </div>
-            <div className="flex items-center gap-3">
-              {user ? (
-                <Badge variant={user.is_admin ? "default" : "secondary"}>
-                  <UserRound className="size-3.5" />
-                  {user.is_admin ? "Admin" : "User"}
-                </Badge>
-              ) : null}
-              <Button type="button" variant="outline" onClick={handleLogout}>
-                <LogOut className="size-4" />
-                Sign out
-              </Button>
+            <div className="flex flex-col items-stretch gap-2 sm:items-end">
+              <div className="grid w-full min-w-56 gap-1.5 sm:w-56">
+                <Label htmlFor="active-client" className="text-xs">
+                  Active Client
+                </Label>
+                <Select
+                  value={selectedClientId ?? NO_CLIENT_VALUE}
+                  onValueChange={handleClientChange}
+                >
+                  <SelectTrigger id="active-client" className="w-full">
+                    <SelectValue placeholder="Select client" />
+                  </SelectTrigger>
+                  <SelectContent position="popper" sideOffset={6}>
+                    <SelectItem value={NO_CLIENT_VALUE}>
+                      Select client
+                    </SelectItem>
+                    {clients.map((client) => (
+                      <SelectItem key={client.id} value={client.id}>
+                        {client.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid w-full min-w-56 gap-1.5 sm:w-56">
+                <Label htmlFor="active-date" className="text-xs">
+                  Active Date
+                </Label>
+                <Popover
+                  open={isActiveDatePopoverOpen}
+                  onOpenChange={setIsActiveDatePopoverOpen}
+                >
+                  <PopoverTrigger asChild>
+                    <Button
+                      id="active-date"
+                      type="button"
+                      variant="outline"
+                      className="w-full justify-start text-left font-normal"
+                    >
+                      <CalendarDays className="size-4" />
+                      {activeDate ? (
+                        format(new Date(`${activeDate}T00:00:00`), "PPP")
+                      ) : (
+                        <span>Select date</span>
+                      )}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="end">
+                    <Calendar
+                      mode="single"
+                      selected={
+                        activeDate
+                          ? new Date(`${activeDate}T00:00:00`)
+                          : undefined
+                      }
+                      onSelect={(date) => {
+                        if (!date) {
+                          return;
+                        }
+                        setActiveDate(format(date, "yyyy-MM-dd"));
+                        setIsActiveDatePopoverOpen(false);
+                      }}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
           </div>
         </section>
@@ -1075,7 +929,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               Quick access to workspace sections.
             </p>
             <div className="mt-4">
-              <WorkspaceNav section={section} />
+              <WorkspaceNav section={section} onSignOut={handleLogout} />
             </div>
           </aside>
 
@@ -1151,86 +1005,195 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
 
             {!isLoadingWorkspace && section === "client-sales" ? (
               <div className="space-y-5">
-                <div className="grid gap-2">
-                  <Label htmlFor="client-sales-client">Client</Label>
-                  <Select
-                    value={selectedClientId ?? NO_CLIENT_VALUE}
-                    onValueChange={(value) =>
-                      setSelectedClientId(
-                        value === NO_CLIENT_VALUE ? null : value,
-                      )
-                    }
-                  >
-                    <SelectTrigger id="client-sales-client" className="w-full">
-                      <SelectValue placeholder="Select client" />
-                    </SelectTrigger>
-                    <SelectContent position="popper" sideOffset={6}>
-                      <SelectItem value={NO_CLIENT_VALUE}>
-                        Select client
-                      </SelectItem>
-                      {clients.map((client) => (
-                        <SelectItem key={client.id} value={client.id}>
-                          {client.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Popover
+                      open={isSalesFilterPopoverOpen}
+                      onOpenChange={setIsSalesFilterPopoverOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-[240px] justify-start text-left font-normal",
+                            !salesFilterDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarDays className="size-4" />
+                          {salesFilterDate ? (
+                            format(salesFilterDate, "PPP")
+                          ) : (
+                            <span>Filter by day</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={salesFilterDate}
+                          onSelect={(date) => {
+                            setSalesFilterDate(date);
+                            if (date) {
+                              setActiveDate(format(date, "yyyy-MM-dd"));
+                              setIsSalesFilterPopoverOpen(false);
+                            }
+                          }}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    {salesFilterDate ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setSalesFilterDate(undefined)}
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
 
-                <div className="flex justify-end">
-                  <Button
-                    type="button"
-                    onClick={() => setIsClientSaleModalOpen(true)}
-                    disabled={!selectedSalesClient}
-                  >
-                    <PlusCircle className="size-4" />
-                    Add Client Sale
-                  </Button>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsClientSalesExportModalOpen(true)}
+                      disabled={!selectedSalesClient}
+                    >
+                      <FileOutput className="size-4" />
+                      Export
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsClientSaleOcrModalOpen(true)}
+                      disabled={!selectedSalesClient}
+                    >
+                      <ArrowUpRight className="size-4" />
+                      Process OCR Sale
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleOpenCreateSaleModal}
+                      disabled={!selectedSalesClient}
+                    >
+                      <PlusCircle className="size-4" />
+                      Add Client Sale
+                    </Button>
+                  </div>
                 </div>
 
                 <Separator />
+
+                <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div className="grid gap-1">
+                      <Label htmlFor="client-sales-daily-summary">
+                        Daily Summary of Sales
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        {salesFilterDate
+                          ? `Set summary for ${format(salesFilterDate, "PPP")}`
+                          : "Select a day first to set the summary."}
+                      </p>
+                    </div>
+                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
+                      <Input
+                        id="client-sales-daily-summary"
+                        type="number"
+                        step="0.01"
+                        min={0}
+                        className="h-9 w-full sm:w-[220px]"
+                        value={dailySummarySalesInput}
+                        onChange={(event) =>
+                          setDailySummarySalesInput(event.target.value)
+                        }
+                        disabled={!selectedSalesClient || !salesFilterDate}
+                      />
+                      <Button
+                        type="button"
+                        onClick={() => void handleSaveDailySummarySales()}
+                        disabled={
+                          !selectedSalesClient ||
+                          !salesFilterDate ||
+                          isSavingDailySummarySales
+                        }
+                      >
+                        {isSavingDailySummarySales ? (
+                          <LoaderCircle className="size-4 animate-spin" />
+                        ) : null}
+                        Save
+                      </Button>
+                    </div>
+                  </div>
+                </div>
 
                 <div className="overflow-hidden rounded-xl border border-border/70">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Client</TableHead>
-                        <TableHead>User ID</TableHead>
-                        <TableHead>Date From</TableHead>
-                        <TableHead>Date To</TableHead>
-                        <TableHead>Created</TableHead>
+                        <TableHead>Transaction Period</TableHead>
+                        <TableHead>Items</TableHead>
+                        <TableHead>Total Sale</TableHead>
                         <TableHead>Updated</TableHead>
+                        <TableHead className="w-[220px]">Actions</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {isLoadingExports ? (
                         <TableRow>
-                          <TableCell colSpan={6}>Loading...</TableCell>
+                          <TableCell colSpan={5}>Loading...</TableCell>
                         </TableRow>
-                      ) : exports.length ? (
-                        exports.map((entry) => (
-                          <TableRow key={entry.id}>
-                            <TableCell>
-                              {selectedSalesClient?.name ?? "-"}
-                            </TableCell>
-                            <TableCell>{entry.user_id}</TableCell>
-                            <TableCell>{entry.date_from}</TableCell>
-                            <TableCell>{entry.date_to}</TableCell>
-                            <TableCell>
-                              {formatDate(entry.created_at)}
-                            </TableCell>
-                            <TableCell>
-                              {formatDate(entry.updated_at)}
-                            </TableCell>
-                          </TableRow>
-                        ))
+                      ) : filteredExports.length ? (
+                        filteredExports.map((entry) => {
+                          return (
+                            <TableRow key={entry.id}>
+                              <TableCell>
+                                {entry.transaction_period ?? "Not set"}
+                              </TableCell>
+                              <TableCell>{entry.items.length}</TableCell>
+                              <TableCell>{entry.total.toFixed(2)}</TableCell>
+                              <TableCell>
+                                {formatDate(entry.updated_at)}
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex gap-2">
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    variant="outline"
+                                    onClick={() =>
+                                      setSelectedSalePreview(entry)
+                                    }
+                                  >
+                                    <View className="size-4" />
+                                    Preview
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    size="sm"
+                                    onClick={() =>
+                                      openEditClientSaleModal(entry)
+                                    }
+                                  >
+                                    <Pencil className="size-4" />
+                                    Edit
+                                  </Button>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
                       ) : (
                         <TableRow>
                           <TableCell
-                            colSpan={6}
+                            colSpan={5}
                             className="text-center text-muted-foreground"
                           >
-                            No client sales records.
+                            {salesFilterDate
+                              ? "No client sales records for the selected day."
+                              : "No client sales records."}
                           </TableCell>
                         </TableRow>
                       )}
@@ -1312,77 +1275,408 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                 </div>
               </div>
             ) : null}
+
+            {!isLoadingWorkspace && section === "client-expenses" ? (
+              <div className="space-y-5">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Popover
+                      open={isSalesFilterPopoverOpen}
+                      onOpenChange={setIsSalesFilterPopoverOpen}
+                    >
+                      <PopoverTrigger asChild>
+                        <Button
+                          variant="outline"
+                          className={cn(
+                            "w-[240px] justify-start text-left font-normal",
+                            !expenseFilterDate && "text-muted-foreground",
+                          )}
+                        >
+                          <CalendarDays className="size-4" />
+                          {expenseFilterDate ? (
+                            format(expenseFilterDate, "PPP")
+                          ) : (
+                            <span>Filter by day</span>
+                          )}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                          mode="single"
+                          selected={expenseFilterDate}
+                          onSelect={(date) => {
+                            setExpenseFilterDate(date);
+                            if (date) {
+                              setIsSalesFilterPopoverOpen(false);
+                            }
+                          }}
+                          initialFocus
+                        />
+                      </PopoverContent>
+                    </Popover>
+                    {expenseFilterDate ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => setExpenseFilterDate(undefined)}
+                      >
+                        Clear
+                      </Button>
+                    ) : null}
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setIsClientExpensesExportModalOpen(true)}
+                      disabled={!selectedClientId}
+                    >
+                      <FileOutput className="size-4" />
+                      Export
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={handleOpenCreateExpenseModal}
+                      disabled={!selectedClientId}
+                    >
+                      <PlusCircle className="size-4" />
+                      Add Expense
+                    </Button>
+                  </div>
+                </div>
+                <Separator />
+                <div className="overflow-hidden rounded-xl border border-border/70">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Transaction Date</TableHead>
+                        <TableHead>Expense Type</TableHead>
+                        <TableHead>VAT Status</TableHead>
+                        <TableHead className="text-right">Amount</TableHead>
+                        <TableHead className="w-[220px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingExpenses ? (
+                        <TableRow>
+                          <TableCell colSpan={5}>Loading...</TableCell>
+                        </TableRow>
+                      ) : filteredExpenses.length ? (
+                        filteredExpenses.map((entry) => (
+                          <TableRow key={entry.id}>
+                            <TableCell>{entry.transaction_date}</TableCell>
+                            <TableCell>
+                              {EXPENSE_TYPE_LABELS[entry.expense_type]}
+                            </TableCell>
+                            <TableCell>
+                              {entry.vat_status === "vat" ? "VAT" : "Non-VAT"}
+                            </TableCell>
+                            <TableCell className="text-right">
+                              {entry.amount.toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openEditExpenseModal(entry)}
+                                >
+                                  <Pencil className="size-4" /> Edit
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => {
+                                    setExpensePendingDelete(entry);
+                                    setIsDeleteExpenseModalOpen(true);
+                                  }}
+                                >
+                                  <Trash2 className="size-4" /> Delete
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={5}
+                            className="text-center text-muted-foreground"
+                          >
+                            {expenseFilterDate
+                              ? "No expenses found for the selected day."
+                              : "No expenses found."}
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+              </div>
+            ) : null}
+
+            {!isLoadingWorkspace && section === "catalog" ? (
+              <div className="space-y-5">
+                <div className="flex justify-end">
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => {
+                        setCategoriesPage(1);
+                        setIsCatalogCategoriesModalOpen(true);
+                        setCategoryFormError(null);
+                      }}
+                      disabled={!selectedClientId}
+                    >
+                      <BookOpen className="size-4" />
+                      Manage Categories
+                    </Button>
+                    <Button
+                      type="button"
+                      onClick={openCatalogItemCreateModal}
+                      disabled={!selectedClientId}
+                    >
+                      <PlusCircle className="size-4" />
+                      Add Item
+                    </Button>
+                  </div>
+                </div>
+                <div className="grid gap-2">
+                  <Label htmlFor="catalog-search">Search</Label>
+                  <Input
+                    id="catalog-search"
+                    value={catalogSearch}
+                    onChange={(event) => {
+                      setCatalogSearch(event.target.value);
+                      setCatalogPage(1);
+                    }}
+                    placeholder="Search item, category, or price"
+                    disabled={!selectedClientId || isLoadingCatalogItems}
+                  />
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-border/70">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Category</TableHead>
+                        <TableHead>Item</TableHead>
+                        <TableHead className="text-right">Unit Price</TableHead>
+                        <TableHead className="w-[180px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {isLoadingCatalogItems ? (
+                        [
+                          "catalog-skeleton-1",
+                          "catalog-skeleton-2",
+                          "catalog-skeleton-3",
+                          "catalog-skeleton-4",
+                          "catalog-skeleton-5",
+                          "catalog-skeleton-6",
+                        ].map((key) => (
+                          <TableRow key={key}>
+                            <TableCell>
+                              <Skeleton className="h-4 w-40" />
+                            </TableCell>
+                            <TableCell>
+                              <Skeleton className="h-4 w-56" />
+                            </TableCell>
+                            <TableCell className="text-right">
+                              <Skeleton className="ml-auto h-4 w-20" />
+                            </TableCell>
+                            <TableCell>
+                              <Skeleton className="h-8 w-28" />
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : catalogItems.length ? (
+                        catalogItems.map((row) => (
+                          <TableRow key={row.id}>
+                            <TableCell>{row.category_name ?? "-"}</TableCell>
+                            <TableCell>{row.item_name}</TableCell>
+                            <TableCell className="text-right">
+                              {row.unit_price !== null
+                                ? Number(row.unit_price).toFixed(2)
+                                : "-"}
+                            </TableCell>
+                            <TableCell>
+                              <div className="flex gap-2">
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="outline"
+                                  onClick={() => openCatalogItemEditModal(row)}
+                                >
+                                  <Pencil className="size-4" /> Edit
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() =>
+                                    openDeleteCatalogItemModal(row)
+                                  }
+                                >
+                                  <Trash2 className="size-4" /> Delete
+                                </Button>
+                              </div>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
+                        <TableRow>
+                          <TableCell
+                            colSpan={4}
+                            className="text-center text-muted-foreground"
+                          >
+                            No catalog items found.
+                          </TableCell>
+                        </TableRow>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    {catalogTotalItems} items total
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={catalogPage <= 1 || isLoadingCatalogItems}
+                      onClick={() =>
+                        setCatalogPage((previous) => Math.max(1, previous - 1))
+                      }
+                    >
+                      Previous
+                    </Button>
+                    {isLoadingCatalogItems ? (
+                      <Skeleton className="h-4 w-24" />
+                    ) : (
+                      <p className="text-sm text-muted-foreground">
+                        Page {catalogPage} of {catalogTotalPages}
+                      </p>
+                    )}
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        catalogPage >= catalogTotalPages ||
+                        isLoadingCatalogItems
+                      }
+                      onClick={() =>
+                        setCatalogPage((previous) =>
+                          Math.min(catalogTotalPages, previous + 1),
+                        )
+                      }
+                    >
+                      Next
+                    </Button>
+                  </div>
+                </div>
+                {catalogLoadError ? (
+                  <p className="text-sm text-destructive">{catalogLoadError}</p>
+                ) : null}
+              </div>
+            ) : null}
           </article>
         </section>
       </main>
 
-      <aside className="fixed right-4 bottom-4 z-40 w-[min(92vw,380px)] rounded-2xl border border-border/70 bg-background/95 p-4 shadow-lg backdrop-blur">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">OCR Queue</h3>
-          <div className="flex items-center gap-2">
-            <Badge variant={activeQueueCount > 0 ? "default" : "secondary"}>
-              {activeQueueCount} active
-            </Badge>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleRemoveFinishedOcrJobs}
-            >
-              <X className="size-3.5" />
-              Remove finished
-            </Button>
-          </div>
+      {activeQueueCount > 0 && isOcrQueueHidden ? (
+        <div className="fixed right-4 bottom-4 z-40">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setIsOcrQueueHidden(false)}
+          >
+            Show OCR Queue ({activeQueueCount})
+          </Button>
         </div>
-        <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
-          {ocrJobs.length ? (
-            ocrJobs.map((job) => (
-              <div
-                key={job.id}
-                className="rounded-lg border border-border/70 p-2 text-xs"
+      ) : null}
+
+      {activeQueueCount > 0 && !isOcrQueueHidden ? (
+        <aside className="fixed right-4 bottom-4 z-40 w-[min(92vw,380px)] rounded-2xl border border-border/70 bg-background/95 p-4 shadow-lg backdrop-blur">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold">OCR Queue</h3>
+            <div className="flex items-center gap-2">
+              <Badge variant="default">{activeQueueCount} active</Badge>
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                onClick={() => setIsOcrQueueHidden(true)}
               >
-                <p className="truncate font-medium">{job.file_name}</p>
-                <p className="mt-1 text-muted-foreground">
-                  {job.status.toUpperCase()}
-                </p>
-                {job.error_message ? (
-                  <p className="mt-1 line-clamp-2 text-destructive">
-                    {job.error_message}
+                Hide
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={handleRemoveFinishedOcrJobs}
+              >
+                <X className="size-3.5" />
+                Remove finished
+              </Button>
+            </div>
+          </div>
+          <div className="mt-3 max-h-64 space-y-2 overflow-auto pr-1">
+            {ocrJobs.length ? (
+              ocrJobs.map((job) => (
+                <div
+                  key={job.id}
+                  className="rounded-lg border border-border/70 p-2 text-xs"
+                >
+                  <p className="truncate font-medium">{job.file_name}</p>
+                  <p className="mt-1 text-muted-foreground">
+                    {job.status.toUpperCase()}
                   </p>
-                ) : null}
-                <div className="mt-2 flex items-center gap-2">
-                  {job.status === "queued" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => handleStopQueuedOcrJob(job.id)}
-                    >
-                      <Square className="size-3.5" />
-                      Stop
-                    </Button>
+                  {job.error_message ? (
+                    <p className="mt-1 line-clamp-2 text-destructive">
+                      {job.error_message}
+                    </p>
                   ) : null}
-                  {job.status === "failed" ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      variant="outline"
-                      onClick={() => void handleRetryFailedOcrJob(job.id)}
-                    >
-                      <RefreshCw className="size-3.5" />
-                      Retry
-                    </Button>
-                  ) : null}
+                  <div className="mt-2 flex items-center gap-2">
+                    {job.status === "queued" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => handleStopQueuedOcrJob(job.id)}
+                      >
+                        <Square className="size-3.5" />
+                        Stop
+                      </Button>
+                    ) : null}
+                    {job.status === "failed" ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => void handleRetryFailedOcrJob(job.id)}
+                      >
+                        <RefreshCw className="size-3.5" />
+                        Retry
+                      </Button>
+                    ) : null}
+                  </div>
                 </div>
-              </div>
-            ))
-          ) : (
-            <p className="text-xs text-muted-foreground">
-              No queued OCR jobs yet.
-            </p>
-          )}
-        </div>
-      </aside>
+              ))
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No queued OCR jobs yet.
+              </p>
+            )}
+          </div>
+        </aside>
+      ) : null}
 
       <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>
         <DialogContent>
@@ -1535,9 +1829,392 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
       </Dialog>
 
       <Dialog
-        open={isClientSaleModalOpen}
+        open={isClientSalesExportModalOpen}
         onOpenChange={(open) => {
-          setIsClientSaleModalOpen(open);
+          if (isExportingClientSales || isLoadingClientSalesPreview) {
+            return;
+          }
+          setIsClientSalesExportModalOpen(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Export Client Sales</DialogTitle>
+            <DialogDescription>
+              Select month and year for the export file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="client-sales-export-month">Month</Label>
+                <Select
+                  value={String(exportMonth)}
+                  onValueChange={(value) => setExportMonth(Number(value))}
+                >
+                  <SelectTrigger
+                    id="client-sales-export-month"
+                    className="w-full"
+                  >
+                    <SelectValue placeholder="Month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">January</SelectItem>
+                    <SelectItem value="2">February</SelectItem>
+                    <SelectItem value="3">March</SelectItem>
+                    <SelectItem value="4">April</SelectItem>
+                    <SelectItem value="5">May</SelectItem>
+                    <SelectItem value="6">June</SelectItem>
+                    <SelectItem value="7">July</SelectItem>
+                    <SelectItem value="8">August</SelectItem>
+                    <SelectItem value="9">September</SelectItem>
+                    <SelectItem value="10">October</SelectItem>
+                    <SelectItem value="11">November</SelectItem>
+                    <SelectItem value="12">December</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="client-sales-export-year">Year</Label>
+                <Input
+                  id="client-sales-export-year"
+                  type="number"
+                  min={2000}
+                  max={2100}
+                  value={exportYear}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    if (Number.isNaN(parsed)) {
+                      return;
+                    }
+                    setExportYear(parsed);
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setIsClientSalesExportModalOpen(false)}
+                disabled={isExportingClientSales}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={async () => {
+                  const payload = await handlePreviewClientSalesByMonth();
+                  if (!payload) {
+                    return;
+                  }
+                  setActivePreviewSheetName(payload.sheets[0]?.name ?? "");
+                  setIsClientSalesPreviewModalOpen(true);
+                }}
+                disabled={
+                  !selectedSalesClient ||
+                  isExportingClientSales ||
+                  isLoadingClientSalesPreview
+                }
+              >
+                {isLoadingClientSalesPreview ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <View className="size-4" />
+                )}
+                Preview
+              </Button>
+              <Button
+                type="button"
+                onClick={async () => {
+                  const didExport = await handleExportClientSalesByMonth();
+                  if (didExport) {
+                    setIsClientSalesExportModalOpen(false);
+                  }
+                }}
+                disabled={
+                  !selectedSalesClient ||
+                  isExportingClientSales ||
+                  isLoadingClientSalesPreview
+                }
+              >
+                {isExportingClientSales ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <FileOutput className="size-4" />
+                )}
+                Export
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isClientSalesPreviewModalOpen}
+        onOpenChange={(open) => {
+          setIsClientSalesPreviewModalOpen(open);
+          if (!open) {
+            setClientSalesPreview(null);
+            setActivePreviewSheetName("");
+          }
+        }}
+      >
+        <DialogContent className="max-h-[92vh] max-w-[96vw]">
+          <DialogHeader>
+            <DialogTitle>Client Sales Preview</DialogTitle>
+            <DialogDescription>
+              View export sheets before downloading the Excel file.
+            </DialogDescription>
+          </DialogHeader>
+          {clientSalesPreview ? (
+            <div className="grid gap-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm text-muted-foreground">
+                  {clientSalesPreview.year}-
+                  {String(clientSalesPreview.month).padStart(2, "0")} •{" "}
+                  {clientSalesPreview.sheets.length} sheet(s)
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="client-sales-preview-sheet">Sheet</Label>
+                  <Select
+                    value={activePreviewSheet?.name ?? ""}
+                    onValueChange={setActivePreviewSheetName}
+                  >
+                    <SelectTrigger
+                      id="client-sales-preview-sheet"
+                      className="w-[280px]"
+                    >
+                      <SelectValue placeholder="Select a sheet" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {clientSalesPreview.sheets.map((sheet) => (
+                        <SelectItem key={sheet.name} value={sheet.name}>
+                          {sheet.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {clientSalesPreview.is_truncated ? (
+                <p className="text-xs text-amber-600">
+                  Showing first {clientSalesPreview.max_rows_per_sheet} rows per
+                  sheet.
+                </p>
+              ) : null}
+
+              {activePreviewSheet ? (
+                <>
+                  <div className="space-y-4">
+                    {previewPeriodGroups.map((group) => {
+                      const firstRow = group.rowsFull[0] ?? null;
+                      const notes =
+                        firstRow && activePreviewColumnIndexes.notes >= 0
+                          ? String(
+                              firstRow[activePreviewColumnIndexes.notes] ?? "",
+                            ).trim() || "-"
+                          : "-";
+                      const discountType =
+                        firstRow && activePreviewColumnIndexes.discountType >= 0
+                          ? String(
+                              firstRow[
+                                activePreviewColumnIndexes.discountType
+                              ] ?? "",
+                            )
+                              .trim()
+                              .toLowerCase()
+                          : "";
+                      const discountValue =
+                        firstRow &&
+                        activePreviewColumnIndexes.discountValue >= 0
+                          ? parsePreviewNumber(
+                              firstRow[
+                                activePreviewColumnIndexes.discountValue
+                              ],
+                            )
+                          : null;
+                      const subtotal =
+                        firstRow && activePreviewColumnIndexes.subtotal >= 0
+                          ? parsePreviewNumber(
+                              firstRow[activePreviewColumnIndexes.subtotal],
+                            )
+                          : null;
+                      const grandTotal =
+                        firstRow && activePreviewColumnIndexes.grandTotal >= 0
+                          ? parsePreviewNumber(
+                              firstRow[activePreviewColumnIndexes.grandTotal],
+                            )
+                          : null;
+                      const appliedDiscount =
+                        subtotal !== null && grandTotal !== null
+                          ? subtotal - grandTotal
+                          : null;
+                      const discountValueDisplay =
+                        discountValue === null
+                          ? "-"
+                          : discountType === "percent"
+                            ? `${discountValue.toFixed(2)}% (${appliedDiscount?.toFixed(2) ?? "-"})`
+                            : discountValue.toFixed(2);
+
+                      return (
+                        <div key={`${activePreviewSheet.name}-${group.label}`}>
+                          <p className="mb-2 text-sm font-semibold">
+                            {group.label} Sales
+                          </p>
+                          <div className="rounded-lg border">
+                            <div className="max-h-[62vh] overflow-auto">
+                              <Table>
+                                <TableHeader className="sticky top-0 bg-background">
+                                  <TableRow>
+                                    {activePreviewLineTable.columns.map(
+                                      (column) => (
+                                        <TableHead
+                                          key={column}
+                                          className={getPreviewColumnWidthClass(
+                                            column,
+                                          )}
+                                        >
+                                          {column}
+                                        </TableHead>
+                                      ),
+                                    )}
+                                    <TableHead className="w-[220px] min-w-[220px]">
+                                      Discount
+                                    </TableHead>
+                                  </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                  {group.rowsTrimmed.length ? (
+                                    group.rowsTrimmed.map((row, rowIndex) => (
+                                      <TableRow
+                                        key={`${activePreviewSheet.name}-${group.label}-${String(row[0])}-${rowIndex}`}
+                                      >
+                                        {row.map((cell, cellIndex) => (
+                                          <TableCell
+                                            key={`${group.label}-${String(row[0])}-${activePreviewLineTable.columns[cellIndex]}`}
+                                            className={getPreviewColumnWidthClass(
+                                              activePreviewLineTable.columns[
+                                                cellIndex
+                                              ] ?? "",
+                                            )}
+                                          >
+                                            {cell}
+                                          </TableCell>
+                                        ))}
+                                        {rowIndex === 0 ? (
+                                          <TableCell
+                                            rowSpan={group.rowsTrimmed.length}
+                                            className="w-[220px] min-w-[220px] align-top"
+                                          >
+                                            <div className="space-y-1">
+                                              <p className="font-medium">
+                                                {notes}
+                                              </p>
+                                              <p className="tabular-nums">
+                                                {discountValueDisplay}
+                                              </p>
+                                            </div>
+                                          </TableCell>
+                                        ) : null}
+                                      </TableRow>
+                                    ))
+                                  ) : (
+                                    <TableRow>
+                                      <TableCell
+                                        colSpan={
+                                          activePreviewLineTable.columns
+                                            .length + 1
+                                        }
+                                        className="text-muted-foreground"
+                                      >
+                                        No line rows for this sheet.
+                                      </TableCell>
+                                    </TableRow>
+                                  )}
+                                </TableBody>
+                              </Table>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {!previewPeriodGroups.length ? (
+                      <div className="rounded-lg border">
+                        <p className="p-4 text-sm text-muted-foreground">
+                          No line rows for this sheet.
+                        </p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="space-y-3 rounded-lg border p-3">
+                    {activePreviewSheetRows.totalRows.length ? (
+                      <Table>
+                        <TableBody>
+                          {activePreviewSheetRows.totalRows.map(
+                            (row, rowIndex) => (
+                              <TableRow
+                                key={`${activePreviewSheet.name}-total-${rowIndex}`}
+                              >
+                                {row.map((cell, cellIndex) => (
+                                  <TableCell
+                                    key={`${activePreviewSheet.name}-total-${rowIndex}-${cellIndex}`}
+                                    className="py-1"
+                                  >
+                                    {cell}
+                                  </TableCell>
+                                ))}
+                              </TableRow>
+                            ),
+                          )}
+                        </TableBody>
+                      </Table>
+                    ) : null}
+                    <div className="grid gap-3 rounded-md border border-border/70 bg-muted/20 p-3 sm:grid-cols-2">
+                      <div className="space-y-2 text-sm">
+                        <p className="text-muted-foreground">
+                          Daily Summary of Sales
+                        </p>
+                        <p className="text-base font-semibold tabular-nums">
+                          {manualSummaryOfSales?.toFixed(2) ?? "-"}
+                        </p>
+                      </div>
+                      <div className="space-y-2 text-sm">
+                        <p className="font-medium tabular-nums">
+                          Total Sales from Order Slip:{" "}
+                          {activePreviewSheetTotals.totalSalesFromOrderSlip?.toFixed(
+                            2,
+                          ) ?? "-"}
+                        </p>
+                        <p className="font-medium tabular-nums">
+                          Total Discount:{" "}
+                          {activePreviewSheetTotals.totalDiscount?.toFixed(2) ??
+                            "-"}
+                        </p>
+                        <p className="text-base font-semibold tabular-nums">
+                          Computed Variance:{" "}
+                          {computedVariance?.toFixed(2) ?? "-"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              No preview data loaded.
+            </p>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isClientSaleOcrModalOpen}
+        onOpenChange={(open) => {
+          setIsClientSaleOcrModalOpen(open);
           if (!open) {
             setSaleImages([]);
             setSaleImagesError(null);
@@ -1546,7 +2223,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
       >
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Client Sale</DialogTitle>
+            <DialogTitle>Process OCR Sale</DialogTitle>
             <DialogDescription>
               Upload sales images and process them into an export file.
             </DialogDescription>
@@ -1600,6 +2277,1125 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         </DialogContent>
       </Dialog>
 
+      <Dialog
+        open={isClientSaleModalOpen}
+        onOpenChange={(open) => {
+          if (isSavingClientSale) {
+            return;
+          }
+          setIsClientSaleModalOpen(open);
+          if (!open) {
+            resetClientSaleForm();
+          }
+        }}
+      >
+        <DialogContent className="max-w-6xl">
+          <DialogHeader>
+            <DialogTitle>
+              {editingSaleId ? "Edit Client Sale" : "Add Client Sale"}
+            </DialogTitle>
+            <DialogDescription>
+              {editingSaleId
+                ? "Update sale details and items."
+                : "Enter sale details and items in a cart-style form."}
+            </DialogDescription>
+          </DialogHeader>
+          <form className="grid gap-4">
+            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+              <div className="grid gap-4">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div className="grid gap-2">
+                    <Label>Client</Label>
+                    <Input value={selectedSalesClient?.name ?? ""} disabled />
+                  </div>
+                  <div className="grid gap-2">
+                    <Label htmlFor="client-sale-date">Sale date</Label>
+                    <Input
+                      id="client-sale-date"
+                      type="date"
+                      value={saleDate}
+                      onChange={(event) => setSaleDate(event.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="grid gap-2 sm:max-w-xs">
+                  <Label>Transaction Period</Label>
+                  <Select
+                    value={saleTransactionPeriod ?? "NONE"}
+                    onValueChange={(value) =>
+                      setSaleTransactionPeriod(
+                        value === "NONE" ? null : (value as "AM" | "PM"),
+                      )
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">Not set</SelectItem>
+                      <SelectItem value="AM">AM</SelectItem>
+                      <SelectItem value="PM">PM</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div className="overflow-hidden rounded-xl border border-border/70">
+                  <div className="h-80 overflow-y-auto">
+                    <Table className="table-fixed">
+                      <TableHeader className="sticky top-0 z-10 bg-background">
+                        <TableRow>
+                          <TableHead>Item</TableHead>
+                          <TableHead className="w-24">Qty</TableHead>
+                          <TableHead className="w-28">Unit Price</TableHead>
+                          <TableHead className="w-28 text-right">
+                            Line Total
+                          </TableHead>
+                          <TableHead className="w-16" />
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {saleItems.map((item) => (
+                          <TableRow key={item.id}>
+                            <TableCell className="min-w-0">
+                              <Popover
+                                open={activeItemSuggestionRowId === item.id}
+                                onOpenChange={(open) => {
+                                  setActiveItemSuggestionRowId(
+                                    open ? item.id : null,
+                                  );
+                                  setSuggestionQuery(open ? item.itemName : "");
+                                }}
+                              >
+                                <PopoverTrigger asChild>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    role="combobox"
+                                    aria-expanded={
+                                      activeItemSuggestionRowId === item.id
+                                    }
+                                    className="w-full min-w-0 justify-between font-normal"
+                                  >
+                                    <span className="truncate text-left">
+                                      {item.itemName || "Select or type item"}
+                                    </span>
+                                    <ChevronsUpDown className="opacity-50" />
+                                  </Button>
+                                </PopoverTrigger>
+                                <PopoverContent
+                                  align="start"
+                                  className="w-[min(28rem,calc(100vw-2rem))] min-w-[var(--radix-popover-trigger-width)] p-0"
+                                >
+                                  <Command>
+                                    <CommandInput
+                                      placeholder="Search or type item..."
+                                      className="h-9"
+                                      value={suggestionQuery}
+                                      onValueChange={(value) => {
+                                        setSuggestionQuery(value);
+                                      }}
+                                    />
+                                    <CommandList>
+                                      <CommandEmpty>
+                                        No item found.
+                                      </CommandEmpty>
+                                      <CommandGroup>
+                                        {filteredItemSuggestions.map(
+                                          (suggestion) => (
+                                            <CommandItem
+                                              key={`${item.id}-${suggestion.id}`}
+                                              value={suggestion.item_name}
+                                              onSelect={() => {
+                                                setSaleItems((previous) =>
+                                                  previous.map((entry) =>
+                                                    entry.id !== item.id
+                                                      ? entry
+                                                      : {
+                                                          ...entry,
+                                                          itemName:
+                                                            suggestion.item_name,
+                                                          unitPrice:
+                                                            suggestion.unit_price ??
+                                                            0,
+                                                        },
+                                                  ),
+                                                );
+                                                setSuggestionQuery(
+                                                  suggestion.item_name,
+                                                );
+                                                setActiveItemSuggestionRowId(
+                                                  null,
+                                                );
+                                              }}
+                                            >
+                                              {suggestion.item_name}
+                                            </CommandItem>
+                                          ),
+                                        )}
+                                      </CommandGroup>
+                                    </CommandList>
+                                  </Command>
+                                </PopoverContent>
+                              </Popover>
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={item.quantity}
+                                onChange={(event) =>
+                                  updateSaleItem(
+                                    item.id,
+                                    "quantity",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </TableCell>
+                            <TableCell>
+                              <Input
+                                type="number"
+                                min={0}
+                                step="0.01"
+                                value={item.unitPrice}
+                                onChange={(event) =>
+                                  updateSaleItem(
+                                    item.id,
+                                    "unitPrice",
+                                    event.target.value,
+                                  )
+                                }
+                              />
+                            </TableCell>
+                            <TableCell className="text-right text-sm font-medium">
+                              {calculateSaleItemLineTotal(item).toFixed(2)}
+                            </TableCell>
+                            <TableCell>
+                              <Button
+                                type="button"
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => removeSaleItem(item.id)}
+                                disabled={saleItems.length === 1}
+                                aria-label="Remove item"
+                              >
+                                <X className="size-4" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between">
+                  <Button type="button" variant="outline" onClick={addSaleItem}>
+                    <PlusCircle className="size-4" />
+                    Add Item
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    {saleItems.length} item{saleItems.length === 1 ? "" : "s"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="grid gap-4 lg:content-start">
+                <div className="grid gap-4 rounded-lg border border-border/70 p-4">
+                  <p className="text-sm font-semibold">Discount</p>
+                  <div className="grid gap-3">
+                    <div className="grid gap-2">
+                      <Label>Discount Type</Label>
+                      <Select
+                        value={saleDiscountType}
+                        onValueChange={(value) =>
+                          setSaleDiscountType(
+                            value === "percent" ? "percent" : "fixed",
+                          )
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="fixed">Fixed</SelectItem>
+                          <SelectItem value="percent">Percent</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-2">
+                      <Label>Discount Value</Label>
+                      <Input
+                        type="number"
+                        min={0}
+                        max={saleDiscountType === "percent" ? 100 : undefined}
+                        step="0.01"
+                        value={saleDiscountValue}
+                        onChange={(event) =>
+                          setSaleDiscountValue(Number(event.target.value))
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <Label htmlFor="client-sale-notes">Notes</Label>
+                      <Textarea
+                        id="client-sale-notes"
+                        value={saleNotes}
+                        placeholder="Optional notes"
+                        rows={4}
+                        onChange={(event) => setSaleNotes(event.target.value)}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border/70 p-4 text-right text-sm font-semibold">
+                  <div>Subtotal: {saleItemsSubtotal.toFixed(2)}</div>
+                  <div>Discount: {saleDiscountAmount.toFixed(2)}</div>
+                  <div>Total: {saleItemsGrandTotal.toFixed(2)}</div>
+                </div>
+                <Button
+                  type="button"
+                  className="w-full"
+                  disabled={isSavingClientSale}
+                  onClick={() => void handleSubmitClientSaleForm()}
+                >
+                  {isSavingClientSale ? (
+                    <LoaderCircle className="size-4 animate-spin" />
+                  ) : null}
+                  {isSavingClientSale
+                    ? "Saving..."
+                    : editingSaleId
+                      ? "Update Client Sale"
+                      : "Save Client Sale"}
+                </Button>
+              </div>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(selectedSalePreview)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setSelectedSalePreview(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>Sale Preview</DialogTitle>
+            <DialogDescription>
+              {selectedSalePreview
+                ? `Details for sale ${selectedSalePreview.id}`
+                : "Sale details"}
+            </DialogDescription>
+          </DialogHeader>
+          {selectedSalePreview ? (
+            <div className="space-y-5">
+              <div className="grid gap-4 rounded-lg border border-border/70 p-4 md:grid-cols-2">
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Sale ID</p>
+                  <p className="text-sm font-medium">
+                    {selectedSalePreview.id}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">User</p>
+                  <p className="text-sm font-medium">
+                    {usersWithCurrent.find(
+                      (entry) => entry.id === selectedSalePreview.user_id,
+                    )?.email ?? selectedSalePreview.user_id}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Sale Date</p>
+                  <p className="text-sm font-medium">
+                    {selectedSalePreview.sale_date}
+                  </p>
+                </div>
+                <div className="space-y-1">
+                  <p className="text-xs text-muted-foreground">Updated</p>
+                  <p className="text-sm font-medium">
+                    {formatDate(selectedSalePreview.updated_at)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border/70">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Item</TableHead>
+                      <TableHead>Quantity</TableHead>
+                      <TableHead>Unit Price</TableHead>
+                      <TableHead className="text-right">Line Total</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {selectedSalePreview.items.length ? (
+                      selectedSalePreview.items.map((item) => (
+                        <TableRow key={item.id}>
+                          <TableCell>{item.item_name}</TableCell>
+                          <TableCell>{item.quantity}</TableCell>
+                          <TableCell>{item.unit_price.toFixed(2)}</TableCell>
+                          <TableCell className="text-right">
+                            {item.line_total.toFixed(2)}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    ) : (
+                      <TableRow>
+                        <TableCell
+                          colSpan={4}
+                          className="text-center text-muted-foreground"
+                        >
+                          No sale items.
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <div className="space-y-4 rounded-lg border border-border/70 bg-muted/20 p-4">
+                <div className="grid gap-3 text-sm md:grid-cols-4">
+                  <div className="rounded-md border border-border/70 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Subtotal</p>
+                    <p className="font-semibold tabular-nums">
+                      {selectedSalePreview.subtotal.toFixed(2)}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Discount Type
+                    </p>
+                    <p className="font-semibold capitalize">
+                      {selectedSalePreview.discount_type}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-border/70 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">
+                      Discount Value
+                    </p>
+                    <p className="font-semibold tabular-nums">
+                      {formatDiscountDisplay(selectedSalePreview)}
+                    </p>
+                  </div>
+                  <div className="rounded-md border border-foreground/20 bg-background p-3">
+                    <p className="text-xs text-muted-foreground">Total Sale</p>
+                    <p className="text-base font-bold tabular-nums">
+                      {selectedSalePreview.total.toFixed(2)}
+                    </p>
+                  </div>
+                </div>
+                <div className="rounded-md border border-border/70 bg-background p-3">
+                  <p className="text-xs text-muted-foreground">Notes</p>
+                  <p className="mt-1 text-sm leading-relaxed">
+                    {selectedSalePreview.notes ?? "-"}
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isClientExpensesExportModalOpen}
+        onOpenChange={(open) => {
+          if (isExportingClientExpenses || isLoadingClientExpensesPreview) {
+            return;
+          }
+          setIsClientExpensesExportModalOpen(open);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Export Client Expenses</DialogTitle>
+            <DialogDescription>
+              Select month and year for the export file.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="grid gap-2 sm:grid-cols-2">
+              <div className="grid gap-2">
+                <Label htmlFor="client-expenses-export-month">Month</Label>
+                <Select
+                  value={String(expensePreviewMonth)}
+                  onValueChange={(value) =>
+                    setExpensePreviewMonth(Number(value))
+                  }
+                >
+                  <SelectTrigger
+                    id="client-expenses-export-month"
+                    className="w-full"
+                  >
+                    <SelectValue placeholder="Month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="1">January</SelectItem>
+                    <SelectItem value="2">February</SelectItem>
+                    <SelectItem value="3">March</SelectItem>
+                    <SelectItem value="4">April</SelectItem>
+                    <SelectItem value="5">May</SelectItem>
+                    <SelectItem value="6">June</SelectItem>
+                    <SelectItem value="7">July</SelectItem>
+                    <SelectItem value="8">August</SelectItem>
+                    <SelectItem value="9">September</SelectItem>
+                    <SelectItem value="10">October</SelectItem>
+                    <SelectItem value="11">November</SelectItem>
+                    <SelectItem value="12">December</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="grid gap-2">
+                <Label htmlFor="client-expenses-export-year">Year</Label>
+                <Input
+                  id="client-expenses-export-year"
+                  type="number"
+                  min={2000}
+                  max={2100}
+                  value={expensePreviewYear}
+                  onChange={(event) => {
+                    const parsed = Number(event.target.value);
+                    if (Number.isNaN(parsed)) {
+                      return;
+                    }
+                    setExpensePreviewYear(parsed);
+                  }}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => setIsClientExpensesExportModalOpen(false)}
+                disabled={isExportingClientExpenses}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={async () => {
+                  const ok = await handlePreviewClientExpensesByMonth();
+                  if (ok) {
+                    setIsClientExpensesPreviewModalOpen(true);
+                  }
+                }}
+                disabled={
+                  !selectedClientId ||
+                  isExportingClientExpenses ||
+                  isLoadingClientExpensesPreview
+                }
+              >
+                {isLoadingClientExpensesPreview ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <View className="size-4" />
+                )}
+                Preview
+              </Button>
+              <Button
+                type="button"
+                onClick={async () => {
+                  const didExport = await handleExportClientExpensesByMonth();
+                  if (didExport) {
+                    setIsClientExpensesExportModalOpen(false);
+                  }
+                }}
+                disabled={
+                  !selectedClientId ||
+                  isExportingClientExpenses ||
+                  isLoadingClientExpensesPreview
+                }
+              >
+                {isExportingClientExpenses ? (
+                  <LoaderCircle className="size-4 animate-spin" />
+                ) : (
+                  <FileOutput className="size-4" />
+                )}
+                Export
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isClientExpensesPreviewModalOpen}
+        onOpenChange={setIsClientExpensesPreviewModalOpen}
+      >
+        <DialogContent className="max-h-[92vh] max-w-[96vw]">
+          <DialogHeader>
+            <DialogTitle>Client Expenses Preview</DialogTitle>
+            <DialogDescription>
+              REVOLVING FUND REPLENISHMENT REPORT (Sheet 1 style).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-3">
+            <p className="text-sm text-muted-foreground">
+              {expensePreviewYear}-
+              {String(expensePreviewMonth).padStart(2, "0")}
+            </p>
+            <div className="overflow-auto rounded-xl border border-border/70">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {expensePreviewColumns.map((column, index) => (
+                      <TableHead
+                        key={`preview-col-${index}-${column}`}
+                        className={
+                          index === expensePreviewColumns.length - 1
+                            ? "sticky right-0 z-20 w-[120px] min-w-[120px] bg-background"
+                            : index === expensePreviewColumns.length - 2
+                              ? "sticky right-[120px] z-20 w-[120px] min-w-[120px] bg-background"
+                              : undefined
+                        }
+                      >
+                        {column}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {expensePreviewRows.length ? (
+                    expensePreviewRows.map((row) => (
+                      <TableRow key={row.id}>
+                        {row.values.map((value, index) => (
+                          <TableCell
+                            key={`${row.id}-cell-${index}`}
+                            className={
+                              index === expensePreviewColumns.length - 1
+                                ? "sticky right-0 z-10 w-[120px] min-w-[120px] bg-background text-right"
+                                : index === expensePreviewColumns.length - 2
+                                  ? "sticky right-[120px] z-10 w-[120px] min-w-[120px] bg-background text-right"
+                                  : index >= 2
+                                    ? "text-right"
+                                    : ""
+                            }
+                          >
+                            {value}
+                          </TableCell>
+                        ))}
+                      </TableRow>
+                    ))
+                  ) : (
+                    <TableRow>
+                      <TableCell
+                        colSpan={expensePreviewColumns.length}
+                        className="text-center text-muted-foreground"
+                      >
+                        No expenses found for selected month/year.
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            </div>
+            <div className="overflow-auto rounded-xl border border-border/70">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    {expensePreviewColumns.map((column, index) => (
+                      <TableHead
+                        key={`total-col-${index}-${column}`}
+                        className={
+                          index === expensePreviewColumns.length - 1
+                            ? "sticky right-0 z-20 w-[120px] min-w-[120px] bg-background text-right"
+                            : index === expensePreviewColumns.length - 2
+                              ? "sticky right-[120px] z-20 w-[120px] min-w-[120px] bg-background text-right"
+                              : index >= 2
+                                ? "text-right"
+                                : ""
+                        }
+                      >
+                        {column}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    {expensePreviewColumns.map((column, index) => {
+                      const value = expensePreviewTotalsRow[index] ?? 0;
+                      const label = column.trim().toUpperCase();
+                      const display =
+                        index === 0
+                          ? "TOTAL"
+                          : index < 2
+                            ? ""
+                            : value.toFixed(2);
+                      return (
+                        <TableCell
+                          key={`total-value-${index}-${column}`}
+                          className={
+                            index === expensePreviewColumns.length - 1
+                              ? "sticky right-0 z-10 w-[120px] min-w-[120px] bg-background text-right"
+                              : index === expensePreviewColumns.length - 2
+                                ? "sticky right-[120px] z-10 w-[120px] min-w-[120px] bg-background text-right"
+                                : label === "DATE" ||
+                                    label.startsWith("VOUCHER")
+                                  ? ""
+                                  : "text-right"
+                          }
+                        >
+                          {display}
+                        </TableCell>
+                      );
+                    })}
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isExpenseModalOpen}
+        onOpenChange={(open) => {
+          if (isSavingExpense) {
+            return;
+          }
+          setIsExpenseModalOpen(open);
+          if (!open) {
+            resetExpenseForm();
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl">
+          <DialogHeader>
+            <DialogTitle>
+              {selectedExpense ? "Edit Expense" : "Add Expense"}
+            </DialogTitle>
+            <DialogDescription>
+              Track expenses under the selected client.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveExpense();
+            }}
+          >
+            <div className="grid gap-2">
+              <Label htmlFor="expense-date">Transaction date</Label>
+              <Input
+                id="expense-date"
+                type="date"
+                value={expenseDate}
+                onChange={(event) => setExpenseDate(event.target.value)}
+                required
+              />
+            </div>
+            <div className="space-y-3">
+              <Label>Expense Lines</Label>
+              <div className="space-y-2">
+                {expenseLines.map((line) => (
+                  <div
+                    key={line.id}
+                    className="grid gap-2 rounded-lg border border-border/70 p-3 md:grid-cols-[minmax(0,1fr)_180px_140px_42px] md:items-end"
+                  >
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Expense type
+                      </Label>
+                      <Select
+                        value={line.expenseType}
+                        onValueChange={(value) =>
+                          updateExpenseLine(line.id, "expenseType", value)
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select expense type" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {EXPENSE_TYPE_OPTIONS.map((entry) => (
+                            <SelectItem key={entry.value} value={entry.value}>
+                              {entry.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">
+                        Amount
+                      </Label>
+                      <Input
+                        type="number"
+                        className="w-full"
+                        min={0}
+                        step="0.01"
+                        value={line.amount}
+                        onChange={(event) =>
+                          updateExpenseLine(
+                            line.id,
+                            "amount",
+                            event.target.value,
+                          )
+                        }
+                        required
+                      />
+                    </div>
+                    <div className="grid gap-1">
+                      <Label className="text-xs text-muted-foreground">
+                        VAT status
+                      </Label>
+                      <Select
+                        value={line.vatStatus}
+                        onValueChange={(value) =>
+                          updateExpenseLine(line.id, "vatStatus", value)
+                        }
+                      >
+                        <SelectTrigger className="w-full">
+                          <SelectValue placeholder="Select VAT status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {VAT_STATUS_OPTIONS.map((entry) => (
+                            <SelectItem key={entry.value} value={entry.value}>
+                              {entry.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeExpenseLine(line.id)}
+                      disabled={
+                        expenseLines.length === 1 || Boolean(selectedExpense)
+                      }
+                    >
+                      <X className="size-4" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={addExpenseLine}
+                disabled={Boolean(selectedExpense)}
+              >
+                <PlusCircle className="size-4" />
+                Add Line
+              </Button>
+            </div>
+            <Button type="submit" disabled={isSavingExpense}>
+              {isSavingExpense ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <PlusCircle className="size-4" />
+              )}
+              {selectedExpense ? "Save Expense" : "Create Expense"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCatalogItemModalOpen}
+        onOpenChange={(open) => {
+          if (isSavingCatalogItem) {
+            return;
+          }
+          setIsCatalogItemModalOpen(open);
+          if (!open) {
+            setSelectedCatalogItem(null);
+            setCatalogItemFormError(null);
+            setIsCategoryComboboxOpen(false);
+          }
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {selectedCatalogItem ? "Edit Catalog Item" : "Add Catalog Item"}
+            </DialogTitle>
+            <DialogDescription>
+              Manage catalog items for the selected client.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleSaveCatalogItem();
+            }}
+          >
+            <div className="grid gap-2">
+              <Label>Category</Label>
+              <Popover
+                open={isCategoryComboboxOpen}
+                onOpenChange={setIsCategoryComboboxOpen}
+              >
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    aria-expanded={isCategoryComboboxOpen}
+                    className="w-full justify-between"
+                  >
+                    <span className="truncate">
+                      {selectedCatalogCategoryLabel}
+                    </span>
+                    <ChevronsUpDown className="opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0">
+                  <Command>
+                    <CommandInput
+                      placeholder="Search category..."
+                      className="h-9"
+                    />
+                    <CommandList>
+                      <CommandEmpty>No category found.</CommandEmpty>
+                      <CommandGroup>
+                        <CommandItem
+                          value="No category"
+                          data-checked={!catalogItemForm.categoryId}
+                          onSelect={() => {
+                            setCatalogItemForm((previous) => ({
+                              ...previous,
+                              categoryId: "",
+                            }));
+                            setIsCategoryComboboxOpen(false);
+                          }}
+                        >
+                          No category
+                        </CommandItem>
+                        {catalogCategories.map((category) => (
+                          <CommandItem
+                            key={category.id}
+                            value={category.name}
+                            data-checked={
+                              catalogItemForm.categoryId === category.id
+                            }
+                            onSelect={() => {
+                              setCatalogItemForm((previous) => ({
+                                ...previous,
+                                categoryId: category.id,
+                              }));
+                              setIsCategoryComboboxOpen(false);
+                            }}
+                          >
+                            {category.name}
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="catalog-item-name">Item name</Label>
+              <Input
+                id="catalog-item-name"
+                value={catalogItemForm.itemName}
+                onChange={(event) =>
+                  setCatalogItemForm((previous) => ({
+                    ...previous,
+                    itemName: event.target.value,
+                  }))
+                }
+                required
+              />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="catalog-item-price">Unit price</Label>
+              <Input
+                id="catalog-item-price"
+                type="number"
+                min={0}
+                step="0.01"
+                value={catalogItemForm.unitPrice}
+                onChange={(event) =>
+                  setCatalogItemForm((previous) => ({
+                    ...previous,
+                    unitPrice: event.target.value,
+                  }))
+                }
+              />
+            </div>
+            {catalogItemFormError ? (
+              <p className="text-xs text-destructive">{catalogItemFormError}</p>
+            ) : null}
+            <Button type="submit" disabled={isSavingCatalogItem}>
+              {isSavingCatalogItem ? (
+                <LoaderCircle className="size-4 animate-spin" />
+              ) : (
+                <PlusCircle className="size-4" />
+              )}
+              {selectedCatalogItem ? "Save Item" : "Create Item"}
+            </Button>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={isCatalogCategoriesModalOpen}
+        onOpenChange={(open) => {
+          if (isSavingCategory || isDeletingCategory) {
+            return;
+          }
+          setIsCatalogCategoriesModalOpen(open);
+          if (!open) {
+            setSelectedCategory(null);
+            setCategoryFormName("");
+            setCategoryFormError(null);
+            setCategoriesPage(1);
+          }
+        }}
+      >
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Manage Categories</DialogTitle>
+            <DialogDescription>
+              Create, rename, and delete categories for this client.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="grid gap-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void handleCreateOrUpdateCategory();
+            }}
+          >
+            <div className="flex gap-2">
+              <Input
+                value={categoryFormName}
+                placeholder="Category name"
+                onChange={(event) => setCategoryFormName(event.target.value)}
+              />
+              <Button type="submit" disabled={isSavingCategory}>
+                {selectedCategory ? "Save" : "Add"}
+              </Button>
+              {selectedCategory ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => {
+                    setSelectedCategory(null);
+                    setCategoryFormName("");
+                    setCategoryFormError(null);
+                  }}
+                >
+                  Cancel
+                </Button>
+              ) : null}
+            </div>
+            {categoryFormError ? (
+              <p className="text-xs text-destructive">{categoryFormError}</p>
+            ) : null}
+          </form>
+          <div className="overflow-hidden rounded-xl border border-border/70">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead className="w-[180px]">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {catalogCategoriesPageRows.length ? (
+                  catalogCategoriesPageRows.map((category) => (
+                    <TableRow key={category.id}>
+                      <TableCell>{category.name}</TableCell>
+                      <TableCell>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              setSelectedCategory(category);
+                              setCategoryFormName(category.name);
+                              setCategoryFormError(null);
+                            }}
+                          >
+                            <Pencil className="size-4" /> Edit
+                          </Button>
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => {
+                              setCategoryPendingDelete(category);
+                              setIsDeleteCategoryModalOpen(true);
+                            }}
+                          >
+                            <Trash2 className="size-4" /> Delete
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                ) : (
+                  <TableRow>
+                    <TableCell
+                      colSpan={2}
+                      className="text-center text-muted-foreground"
+                    >
+                      {isLoadingCategoriesPage
+                        ? "Loading categories..."
+                        : "No categories yet."}
+                    </TableCell>
+                  </TableRow>
+                )}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {categoriesTotalItems} categories total
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={categoriesPage <= 1 || isLoadingCategoriesPage}
+                onClick={() =>
+                  setCategoriesPage((previous) => Math.max(1, previous - 1))
+                }
+              >
+                Previous
+              </Button>
+              <p className="text-sm text-muted-foreground">
+                Page {categoriesPage} of {categoriesTotalPages}
+              </p>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                disabled={
+                  categoriesPage >= categoriesTotalPages ||
+                  isLoadingCategoriesPage
+                }
+                onClick={() =>
+                  setCategoriesPage((previous) =>
+                    Math.min(categoriesTotalPages, previous + 1),
+                  )
+                }
+              >
+                Next
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       <ConfirmationModal
         open={isDeleteClientModalOpen}
         onOpenChange={(open) => {
@@ -1621,6 +3417,69 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         confirmText="Delete client"
         loading={isDeletingClient}
         onConfirm={handleDeleteClient}
+      />
+      <ConfirmationModal
+        open={isDeleteCatalogItemModalOpen}
+        onOpenChange={(open) => {
+          if (isDeletingCatalogItem) {
+            return;
+          }
+          setIsDeleteCatalogItemModalOpen(open);
+          if (!open) {
+            setCatalogItemPendingDelete(null);
+          }
+        }}
+        title="Delete catalog item?"
+        description={
+          catalogItemPendingDelete
+            ? `This will permanently delete "${catalogItemPendingDelete.item_name}".`
+            : undefined
+        }
+        confirmText="Delete item"
+        loading={isDeletingCatalogItem}
+        onConfirm={handleDeleteCatalogItem}
+      />
+      <ConfirmationModal
+        open={isDeleteExpenseModalOpen}
+        onOpenChange={(open) => {
+          if (isDeletingExpense) {
+            return;
+          }
+          setIsDeleteExpenseModalOpen(open);
+          if (!open) {
+            setExpensePendingDelete(null);
+          }
+        }}
+        title="Delete expense?"
+        description={
+          expensePendingDelete
+            ? `This will permanently delete the expense from ${expensePendingDelete.transaction_date}.`
+            : undefined
+        }
+        confirmText="Delete expense"
+        loading={isDeletingExpense}
+        onConfirm={handleDeleteExpense}
+      />
+      <ConfirmationModal
+        open={isDeleteCategoryModalOpen}
+        onOpenChange={(open) => {
+          if (isDeletingCategory) {
+            return;
+          }
+          setIsDeleteCategoryModalOpen(open);
+          if (!open) {
+            setCategoryPendingDelete(null);
+          }
+        }}
+        title="Delete category?"
+        description={
+          categoryPendingDelete
+            ? `This will permanently delete "${categoryPendingDelete.name}".`
+            : undefined
+        }
+        confirmText="Delete category"
+        loading={isDeletingCategory}
+        onConfirm={handleDeleteCategory}
       />
     </div>
   );

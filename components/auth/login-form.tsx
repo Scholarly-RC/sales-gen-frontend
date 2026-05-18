@@ -7,67 +7,22 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { API_BASE_URL } from "@/lib/api";
 import { setAuthToken } from "@/lib/auth";
+import { apiRequest } from "@/lib/http";
 import { appToast } from "@/lib/toast";
 
 type LoginResponse = {
   access_token: string;
 };
 
-function formatApiError(body: unknown, fallback: string) {
-  if (
-    body &&
-    typeof body === "object" &&
-    "detail" in body &&
-    Array.isArray(body.detail)
-  ) {
-    const first = body.detail[0];
-    if (first && typeof first === "object" && "msg" in first) {
-      const message = first.msg;
-      if (typeof message === "string" && message.trim()) {
-        return message;
-      }
-    }
-  }
-
-  if (
-    body &&
-    typeof body === "object" &&
-    "detail" in body &&
-    typeof body.detail === "string" &&
-    body.detail.trim()
-  ) {
-    return body.detail;
-  }
-
-  return fallback;
-}
-
 async function login(email: string, password: string): Promise<LoginResponse> {
-  const response = await fetch(`${API_BASE_URL}/auth/login`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
+  return apiRequest<LoginResponse>("/auth/login", {
+    errorFallback: "Unable to sign in",
+    init: {
+      method: "POST",
+      body: JSON.stringify({ email, password }),
     },
-    body: JSON.stringify({ email, password }),
-    cache: "no-store",
   });
-
-  if (!response.ok) {
-    let detail = "Unable to sign in";
-
-    try {
-      const body = await response.json();
-      detail = formatApiError(body, detail);
-    } catch {
-      detail = `${response.status} ${response.statusText}`;
-    }
-
-    throw new Error(detail);
-  }
-
-  return response.json() as Promise<LoginResponse>;
 }
 
 export function LoginForm() {

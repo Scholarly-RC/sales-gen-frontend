@@ -1,16 +1,7 @@
 import { notFound } from "next/navigation";
 
-import {
-  type WorkspaceSection,
-  WorkspaceShell,
-} from "@/components/workspace/workspace-shell";
-
-const validSections: WorkspaceSection[] = [
-  "dashboard",
-  "clients",
-  "client-sales",
-  "users",
-];
+import { WorkspaceShell } from "@/components/workspace/workspace-shell";
+import { WORKSPACE_SECTIONS, type WorkspaceSection } from "@/types/workspace";
 
 export default async function WorkspaceSectionPage({
   params,
@@ -19,7 +10,7 @@ export default async function WorkspaceSectionPage({
 }) {
   const { section } = await params;
 
-  if (!validSections.includes(section as WorkspaceSection)) {
+  if (!WORKSPACE_SECTIONS.includes(section as WorkspaceSection)) {
     notFound();
   }
 
