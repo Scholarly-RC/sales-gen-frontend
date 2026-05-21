@@ -1,4 +1,15 @@
 import { API_BASE_URL } from "@/lib/api";
+import { clearAuthToken, setAuthToken } from "@/lib/auth";
+
+export class ApiError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+  }
+}
 
 function getApiErrorMessage(body: unknown, fallback: string) {
   if (
@@ -54,7 +65,32 @@ type ApiRequestOptions = {
   init?: RequestInit;
   baseUrl?: string;
   errorFallback?: string;
+  skipRefreshRetry?: boolean;
 };
+
+type RefreshTokenResponse = {
+  access_token: string;
+};
+
+async function tryRefreshAccessToken(baseUrl: string): Promise<string | null> {
+  const response = await fetch(`${baseUrl}/auth/refresh`, {
+    method: "POST",
+    cache: "no-store",
+    credentials: "include",
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const body = (await response.json()) as RefreshTokenResponse;
+  if (!body.access_token) {
+    return null;
+  }
+
+  setAuthToken(body.access_token);
+  return body.access_token;
+}
 
 export async function apiRequest<T>(
   path: string,
@@ -65,6 +101,7 @@ export async function apiRequest<T>(
     init,
     baseUrl = API_BASE_URL,
     errorFallback = "Request failed",
+    skipRefreshRetry = false,
   } = options;
 
   const headers: HeadersInit = { ...(init?.headers ?? {}) };
@@ -79,9 +116,28 @@ export async function apiRequest<T>(
     ...init,
     headers,
     cache: "no-store",
+    credentials: "include",
   });
 
   if (!response.ok) {
+    const canRetryWithRefresh =
+      response.status === 401 &&
+      !skipRefreshRetry &&
+      Boolean(token) &&
+      path !== "/auth/login" &&
+      path !== "/auth/refresh";
+    if (canRetryWithRefresh) {
+      const nextToken = await tryRefreshAccessToken(baseUrl);
+      if (nextToken) {
+        return apiRequest<T>(path, {
+          ...options,
+          token: nextToken,
+          skipRefreshRetry: true,
+        });
+      }
+      clearAuthToken();
+    }
+
     let detail = errorFallback;
     try {
       const body = await response.json();
@@ -89,7 +145,7 @@ export async function apiRequest<T>(
     } catch {
       detail = `${response.status} ${response.statusText}`;
     }
-    throw new Error(detail);
+    throw new ApiError(detail, response.status);
   }
 
   if (response.status === 204) {

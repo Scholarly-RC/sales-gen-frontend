@@ -822,7 +822,14 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setExpenseFilterDate(new Date(`${activeDate}T00:00:00`));
   }, [activeDate, setExpenseFilterDate, setSalesFilterDate]);
 
-  function handleLogout() {
+  async function handleLogout() {
+    try {
+      await apiRequest<void>("/auth/logout", {
+        init: { method: "POST" },
+      });
+    } catch {
+      // Local auth state should still be cleared even if server logout fails.
+    }
     clearAuthToken();
     router.replace("/login");
     router.refresh();

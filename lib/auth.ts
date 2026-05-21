@@ -1,5 +1,5 @@
 export const ACCESS_TOKEN_KEY = "sales_gen_access_token";
-export const ACCESS_TOKEN_COOKIE = "sales_gen_token";
+export const REFRESH_TOKEN_COOKIE = "sales_gen_refresh_token";
 
 export function setAuthToken(token: string) {
   if (typeof window === "undefined") {
@@ -7,8 +7,6 @@ export function setAuthToken(token: string) {
   }
 
   window.localStorage.setItem(ACCESS_TOKEN_KEY, token);
-  // biome-ignore lint/suspicious/noDocumentCookie: Required for middleware-visible auth cookie.
-  document.cookie = `${ACCESS_TOKEN_COOKIE}=${encodeURIComponent(token)}; Path=/; Max-Age=2592000; SameSite=Lax`;
 }
 
 export function clearAuthToken() {
@@ -17,8 +15,6 @@ export function clearAuthToken() {
   }
 
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
-  // biome-ignore lint/suspicious/noDocumentCookie: Required for middleware-visible auth cookie.
-  document.cookie = `${ACCESS_TOKEN_COOKIE}=; Path=/; Max-Age=0; SameSite=Lax`;
 }
 
 export function getStoredAuthToken() {

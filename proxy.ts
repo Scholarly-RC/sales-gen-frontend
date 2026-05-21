@@ -1,10 +1,10 @@
 import type { NextRequest } from "next/server";
 import { NextResponse } from "next/server";
 
-import { ACCESS_TOKEN_COOKIE } from "@/lib/auth";
+import { REFRESH_TOKEN_COOKIE } from "@/lib/auth";
 
 export function proxy(request: NextRequest) {
-  const token = request.cookies.get(ACCESS_TOKEN_COOKIE)?.value;
+  const token = request.cookies.get(REFRESH_TOKEN_COOKIE)?.value;
   const { pathname } = request.nextUrl;
 
   if (pathname.startsWith("/workspace") && !token) {

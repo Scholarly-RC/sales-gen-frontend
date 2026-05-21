@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
+import { ApiError } from "@/lib/http";
 import { appToast } from "@/lib/toast";
 import type {
   Client,
@@ -79,7 +80,9 @@ export function useWorkspaceData({
           title: "Failed to load workspace",
           description: message,
         });
-        onAuthFailure();
+        if (error instanceof ApiError && error.status === 401) {
+          onAuthFailure();
+        }
       } finally {
         setIsLoadingWorkspace(false);
       }
