@@ -66,6 +66,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { DashboardItems } from "@/components/workspace/dashboard-items";
 import { WorkspaceNav } from "@/components/workspace/workspace-nav";
 import { useCatalogActions } from "@/hooks/workspace/use-catalog-actions";
@@ -114,6 +119,7 @@ const PREVIEW_TOTAL_LABELS = new Set([
   "total discount",
   "variance",
 ]);
+const DISABLE_PROCESS_OCR_SALE = true;
 
 function toPreviewTotalLabel(value: string) {
   return value.trim().toLowerCase();
@@ -1100,15 +1106,28 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                       <FileOutput className="size-4" />
                       Export
                     </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsClientSaleOcrModalOpen(true)}
-                      disabled={!selectedSalesClient}
-                    >
-                      <ArrowUpRight className="size-4" />
-                      Process OCR Sale
-                    </Button>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <span>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setIsClientSaleOcrModalOpen(true)}
+                            disabled={
+                              !selectedSalesClient || DISABLE_PROCESS_OCR_SALE
+                            }
+                          >
+                            <ArrowUpRight className="size-4" />
+                            Process OCR Sale
+                          </Button>
+                        </span>
+                      </TooltipTrigger>
+                      {DISABLE_PROCESS_OCR_SALE ? (
+                        <TooltipContent side="top" sideOffset={6}>
+                          Coming soon
+                        </TooltipContent>
+                      ) : null}
+                    </Tooltip>
                     <Button
                       type="button"
                       onClick={handleOpenCreateSaleModal}
@@ -2292,7 +2311,10 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             <Button
               type="button"
               disabled={
-                isRunningOcr || !selectedSalesClient || !!saleImagesError
+                DISABLE_PROCESS_OCR_SALE ||
+                isRunningOcr ||
+                !selectedSalesClient ||
+                !!saleImagesError
               }
               onClick={() => void handleProcessSales()}
             >
