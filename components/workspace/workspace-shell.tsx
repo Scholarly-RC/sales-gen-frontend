@@ -90,6 +90,7 @@ import {
   calculateSaleItemLineTotal,
   formatDate,
   formatDiscountDisplay,
+  normalizeDateKey,
 } from "@/lib/workspace/utils";
 import type {
   ClientExpenseType,
@@ -447,6 +448,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setActiveItemSuggestionRowId,
   });
   const {
+    expenses,
     isLoadingExpenses,
     isExpenseModalOpen,
     selectedExpense,
@@ -493,6 +495,30 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     () => clients.find((entry) => entry.id === selectedClientId) ?? null,
     [clients, selectedClientId],
   );
+  const salesDatesWithData = useMemo(() => {
+    const uniqueDates = new Set<string>();
+    for (const entry of exports) {
+      const dateKey = normalizeDateKey(entry.sale_date);
+      if (dateKey) {
+        uniqueDates.add(dateKey);
+      }
+    }
+    return Array.from(uniqueDates).map(
+      (dateKey) => new Date(`${dateKey}T00:00:00`),
+    );
+  }, [exports]);
+  const expenseDatesWithData = useMemo(() => {
+    const uniqueDates = new Set<string>();
+    for (const entry of expenses) {
+      const dateKey = normalizeDateKey(entry.transaction_date);
+      if (dateKey) {
+        uniqueDates.add(dateKey);
+      }
+    }
+    return Array.from(uniqueDates).map(
+      (dateKey) => new Date(`${dateKey}T00:00:00`),
+    );
+  }, [expenses]);
   const activePreviewSheet = useMemo(() => {
     if (!clientSalesPreview?.sheets.length) {
       return null;
@@ -1031,6 +1057,9 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                         <Calendar
                           mode="single"
                           selected={salesFilterDate}
+                          modifiers={{
+                            hasData: salesDatesWithData,
+                          }}
                           onSelect={(date) => {
                             setSalesFilterDate(date);
                             if (date) {
@@ -1304,6 +1333,9 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                         <Calendar
                           mode="single"
                           selected={expenseFilterDate}
+                          modifiers={{
+                            hasData: expenseDatesWithData,
+                          }}
                           onSelect={(date) => {
                             setExpenseFilterDate(date);
                             if (date) {
