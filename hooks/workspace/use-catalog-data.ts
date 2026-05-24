@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import type { RequestFn } from "@/lib/http";
 import { debounce } from "@/lib/utils";
 import type {
   ClientCatalogCategoriesPageResponse,
@@ -10,12 +11,6 @@ import type {
   ClientCatalogItemsPageResponse,
   WorkspaceSection,
 } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseCatalogDataParams = {
   token: string | null;

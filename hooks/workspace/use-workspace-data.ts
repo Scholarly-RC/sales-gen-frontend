@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-import { ApiError } from "@/lib/http";
+import { ApiError, type RequestFn } from "@/lib/http";
 import { appToast } from "@/lib/toast";
 import type {
   Client,
@@ -10,12 +10,6 @@ import type {
   User,
   WorkspaceSection,
 } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseWorkspaceDataParams = {
   token: string | null;

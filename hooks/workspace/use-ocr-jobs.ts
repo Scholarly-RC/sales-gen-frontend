@@ -2,14 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 
+import type { RequestFn } from "@/lib/http";
 import { buildWebSocketUrl, upsertOcrJobs } from "@/lib/workspace/utils";
 import type { OcrJob } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseOcrJobsParams = {
   token: string | null;

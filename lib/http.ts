@@ -68,6 +68,12 @@ type ApiRequestOptions = {
   skipRefreshRetry?: boolean;
 };
 
+export type RequestFn = <T>(
+  path: string,
+  token: string,
+  init?: RequestInit,
+) => Promise<T>;
+
 type RefreshTokenResponse = {
   access_token: string;
 };

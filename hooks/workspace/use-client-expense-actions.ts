@@ -3,8 +3,9 @@
 import { format } from "date-fns";
 import { useCallback, useEffect, useMemo, useState } from "react";
 
-import { API_BASE_URL } from "@/lib/api";
+import type { RequestFn } from "@/lib/http";
 import { appToast } from "@/lib/toast";
+import { downloadFileWithToken } from "@/lib/workspace/download";
 import type {
   ClientExpense,
   ClientExpensesExportResponse,
@@ -13,12 +14,6 @@ import type {
   ClientVatStatus,
   WorkspaceSection,
 } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseClientExpenseActionsParams = {
   token: string | null;
@@ -381,26 +376,13 @@ export function useClientExpenseActions({
         token,
         { method: "POST" },
       );
-
-      const response = await fetch(`${API_BASE_URL}${payload.download_path}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      await downloadFileWithToken({
+        token,
+        downloadPath: payload.download_path,
+        fileName: payload.file_name,
+        errorMessage: "Unable to download monthly expense file",
       });
-      if (!response.ok) {
-        throw new Error("Unable to download monthly expense file");
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
       const month = String(expensePreviewMonth).padStart(2, "0");
-      anchor.href = url;
-      anchor.download = payload.file_name;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
       appToast.success({
         title: "Client expenses exported",
         description: `Downloaded ${expensePreviewYear}-${month} export file.`,

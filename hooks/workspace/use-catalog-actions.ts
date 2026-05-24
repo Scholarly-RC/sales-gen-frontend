@@ -2,17 +2,12 @@
 
 import { useMemo, useState } from "react";
 
+import type { RequestFn } from "@/lib/http";
 import { appToast } from "@/lib/toast";
 import type {
   ClientCatalogCategory,
   ClientCatalogItemSuggestion,
 } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseCatalogActionsParams = {
   token: string | null;

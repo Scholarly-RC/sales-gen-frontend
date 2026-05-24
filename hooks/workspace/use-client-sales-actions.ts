@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-import { API_BASE_URL } from "@/lib/api";
+import type { RequestFn } from "@/lib/http";
 import { appToast } from "@/lib/toast";
+import { downloadFileWithToken } from "@/lib/workspace/download";
 import {
   calculateSaleItemLineTotal,
   formatDateKey,
@@ -19,12 +20,6 @@ import type {
   OcrParentSubmissionResponse,
   OcrSalesExportResponse,
 } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseClientSalesActionsParams = {
   token: string | null;
@@ -414,27 +409,12 @@ export function useClientSalesActions({
     }
 
     try {
-      const response = await fetch(
-        `${API_BASE_URL}${processedExport.download_path}`,
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        },
-      );
-      if (!response.ok) {
-        throw new Error("Unable to download processed sales file");
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = processedExport.file_name;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
+      await downloadFileWithToken({
+        token,
+        downloadPath: processedExport.download_path,
+        fileName: processedExport.file_name,
+        errorMessage: "Unable to download processed sales file",
+      });
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Unable to download file";
@@ -459,25 +439,12 @@ export function useClientSalesActions({
           method: "POST",
         },
       );
-
-      const response = await fetch(`${API_BASE_URL}${payload.download_path}`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      await downloadFileWithToken({
+        token,
+        downloadPath: payload.download_path,
+        fileName: payload.file_name,
+        errorMessage: "Unable to download monthly sales file",
       });
-      if (!response.ok) {
-        throw new Error("Unable to download monthly sales file");
-      }
-      const blob = await response.blob();
-      const url = window.URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = payload.file_name;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      window.URL.revokeObjectURL(url);
 
       appToast.success({
         title: "Client sales exported",
@@ -630,6 +597,8 @@ export function useClientSalesActions({
     filteredExports,
     filteredItemSuggestions,
     setSalesFilterDate,
+    setSaleImages,
+    setSaleImagesError,
     setExportMonth,
     setExportYear,
     setSaleDate,

@@ -1,14 +1,9 @@
 "use client";
 
+import type { RequestFn } from "@/lib/http";
 import { appToast } from "@/lib/toast";
 import { upsertOcrJobs } from "@/lib/workspace/utils";
 import type { OcrJob } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseOcrJobActionsParams = {
   token: string | null;

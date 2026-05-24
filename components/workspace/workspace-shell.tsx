@@ -55,7 +55,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
@@ -66,12 +65,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { DashboardItems } from "@/components/workspace/dashboard-items";
+import { MonthSelect } from "@/components/workspace/month-select";
+import { ClientExpensesSection } from "@/components/workspace/sections/client-expenses-section";
+import { ClientSalesSection } from "@/components/workspace/sections/client-sales-section";
 import { WorkspaceNav } from "@/components/workspace/workspace-nav";
 import { useCatalogActions } from "@/hooks/workspace/use-catalog-actions";
 import { useCatalogData } from "@/hooks/workspace/use-catalog-data";
@@ -89,7 +86,7 @@ import { useWorkspaceData } from "@/hooks/workspace/use-workspace-data";
 import { useWorkspaceToken } from "@/hooks/workspace/use-workspace-token";
 import { clearAuthToken } from "@/lib/auth";
 import { apiRequest } from "@/lib/http";
-import { cn } from "@/lib/utils";
+import { getExpensePreviewStickyClass } from "@/lib/workspace/expense-preview";
 import type { ClientFormValues, UserFormValues } from "@/lib/workspace/schemas";
 import {
   calculateSaleItemLineTotal,
@@ -242,6 +239,8 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setCatalogCategories,
     setCatalogSearch,
     setCatalogPage,
+    setCatalogTotalPages,
+    setCatalogTotalItems,
     setCategoriesPage,
     setCatalogItemSuggestions,
     setSuggestionQuery,
@@ -287,6 +286,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setCategoryFormName,
     setCategoryFormError,
     setSelectedCategory,
+    setSelectedCatalogItem,
     openCatalogItemCreateModal,
     openCatalogItemEditModal,
     handleSaveCatalogItem,
@@ -423,6 +423,8 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     filteredExports,
     filteredItemSuggestions,
     setSalesFilterDate,
+    setSaleImages,
+    setSaleImagesError,
     setExportMonth,
     setExportYear,
     setSaleDate,
@@ -1047,219 +1049,29 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             ) : null}
 
             {!isLoadingWorkspace && section === "client-sales" ? (
-              <div className="space-y-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Popover
-                      open={isSalesFilterPopoverOpen}
-                      onOpenChange={setIsSalesFilterPopoverOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-[240px] justify-start text-left font-normal",
-                            !salesFilterDate && "text-muted-foreground",
-                          )}
-                        >
-                          <CalendarDays className="size-4" />
-                          {salesFilterDate ? (
-                            format(salesFilterDate, "PPP")
-                          ) : (
-                            <span>Filter by day</span>
-                          )}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={salesFilterDate}
-                          modifiers={{
-                            hasData: salesDatesWithData,
-                          }}
-                          onSelect={(date) => {
-                            setSalesFilterDate(date);
-                            if (date) {
-                              setActiveDate(format(date, "yyyy-MM-dd"));
-                              setIsSalesFilterPopoverOpen(false);
-                            }
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    {salesFilterDate ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setSalesFilterDate(undefined)}
-                      >
-                        Clear
-                      </Button>
-                    ) : null}
-                  </div>
-
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsClientSalesExportModalOpen(true)}
-                      disabled={!selectedSalesClient}
-                    >
-                      <FileOutput className="size-4" />
-                      Export
-                    </Button>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <span>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            onClick={() => setIsClientSaleOcrModalOpen(true)}
-                            disabled={
-                              !selectedSalesClient || DISABLE_PROCESS_OCR_SALE
-                            }
-                          >
-                            <ArrowUpRight className="size-4" />
-                            Process OCR Sale
-                          </Button>
-                        </span>
-                      </TooltipTrigger>
-                      {DISABLE_PROCESS_OCR_SALE ? (
-                        <TooltipContent side="top" sideOffset={6}>
-                          Coming soon
-                        </TooltipContent>
-                      ) : null}
-                    </Tooltip>
-                    <Button
-                      type="button"
-                      onClick={handleOpenCreateSaleModal}
-                      disabled={!selectedSalesClient}
-                    >
-                      <PlusCircle className="size-4" />
-                      Add Client Sale
-                    </Button>
-                  </div>
-                </div>
-
-                <Separator />
-
-                <div className="rounded-xl border border-border/70 bg-muted/20 p-4">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-                    <div className="grid gap-1">
-                      <Label htmlFor="client-sales-daily-summary">
-                        Daily Summary of Sales
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        {salesFilterDate
-                          ? `Set summary for ${format(salesFilterDate, "PPP")}`
-                          : "Select a day first to set the summary."}
-                      </p>
-                    </div>
-                    <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:items-center">
-                      <Input
-                        id="client-sales-daily-summary"
-                        type="number"
-                        step="0.01"
-                        min={0}
-                        className="h-9 w-full sm:w-[220px]"
-                        value={dailySummarySalesInput}
-                        onChange={(event) =>
-                          setDailySummarySalesInput(event.target.value)
-                        }
-                        disabled={!selectedSalesClient || !salesFilterDate}
-                      />
-                      <Button
-                        type="button"
-                        onClick={() => void handleSaveDailySummarySales()}
-                        disabled={
-                          !selectedSalesClient ||
-                          !salesFilterDate ||
-                          isSavingDailySummarySales
-                        }
-                      >
-                        {isSavingDailySummarySales ? (
-                          <LoaderCircle className="size-4 animate-spin" />
-                        ) : null}
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="overflow-hidden rounded-xl border border-border/70">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Transaction Period</TableHead>
-                        <TableHead>Items</TableHead>
-                        <TableHead>Total Sale</TableHead>
-                        <TableHead>Updated</TableHead>
-                        <TableHead className="w-[220px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {isLoadingExports ? (
-                        <TableRow>
-                          <TableCell colSpan={5}>Loading...</TableCell>
-                        </TableRow>
-                      ) : filteredExports.length ? (
-                        filteredExports.map((entry) => {
-                          return (
-                            <TableRow key={entry.id}>
-                              <TableCell>
-                                {entry.transaction_period ?? "Not set"}
-                              </TableCell>
-                              <TableCell>{entry.items.length}</TableCell>
-                              <TableCell>{entry.total.toFixed(2)}</TableCell>
-                              <TableCell>
-                                {formatDate(entry.updated_at)}
-                              </TableCell>
-                              <TableCell>
-                                <div className="flex gap-2">
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    variant="outline"
-                                    onClick={() =>
-                                      setSelectedSalePreview(entry)
-                                    }
-                                  >
-                                    <View className="size-4" />
-                                    Preview
-                                  </Button>
-                                  <Button
-                                    type="button"
-                                    size="sm"
-                                    onClick={() =>
-                                      openEditClientSaleModal(entry)
-                                    }
-                                  >
-                                    <Pencil className="size-4" />
-                                    Edit
-                                  </Button>
-                                </div>
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            colSpan={5}
-                            className="text-center text-muted-foreground"
-                          >
-                            {salesFilterDate
-                              ? "No client sales records for the selected day."
-                              : "No client sales records."}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
+              <ClientSalesSection
+                isSalesFilterPopoverOpen={isSalesFilterPopoverOpen}
+                setIsSalesFilterPopoverOpen={setIsSalesFilterPopoverOpen}
+                salesFilterDate={salesFilterDate}
+                setSalesFilterDate={setSalesFilterDate}
+                salesDatesWithData={salesDatesWithData}
+                setActiveDate={setActiveDate}
+                selectedSalesClient={selectedSalesClient}
+                setIsClientSalesExportModalOpen={
+                  setIsClientSalesExportModalOpen
+                }
+                setIsClientSaleOcrModalOpen={setIsClientSaleOcrModalOpen}
+                disableProcessOcrSale={DISABLE_PROCESS_OCR_SALE}
+                handleOpenCreateSaleModal={handleOpenCreateSaleModal}
+                dailySummarySalesInput={dailySummarySalesInput}
+                setDailySummarySalesInput={setDailySummarySalesInput}
+                handleSaveDailySummarySales={handleSaveDailySummarySales}
+                isSavingDailySummarySales={isSavingDailySummarySales}
+                isLoadingExports={isLoadingExports}
+                filteredExports={filteredExports}
+                setSelectedSalePreview={setSelectedSalePreview}
+                openEditClientSaleModal={openEditClientSaleModal}
+              />
             ) : null}
 
             {!isLoadingWorkspace && section === "users" ? (
@@ -1336,146 +1148,24 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             ) : null}
 
             {!isLoadingWorkspace && section === "client-expenses" ? (
-              <div className="space-y-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Popover
-                      open={isSalesFilterPopoverOpen}
-                      onOpenChange={setIsSalesFilterPopoverOpen}
-                    >
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className={cn(
-                            "w-[240px] justify-start text-left font-normal",
-                            !expenseFilterDate && "text-muted-foreground",
-                          )}
-                        >
-                          <CalendarDays className="size-4" />
-                          {expenseFilterDate ? (
-                            format(expenseFilterDate, "PPP")
-                          ) : (
-                            <span>Filter by day</span>
-                          )}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={expenseFilterDate}
-                          modifiers={{
-                            hasData: expenseDatesWithData,
-                          }}
-                          onSelect={(date) => {
-                            setExpenseFilterDate(date);
-                            if (date) {
-                              setIsSalesFilterPopoverOpen(false);
-                            }
-                          }}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                    {expenseFilterDate ? (
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setExpenseFilterDate(undefined)}
-                      >
-                        Clear
-                      </Button>
-                    ) : null}
-                  </div>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => setIsClientExpensesExportModalOpen(true)}
-                      disabled={!selectedClientId}
-                    >
-                      <FileOutput className="size-4" />
-                      Export
-                    </Button>
-                    <Button
-                      type="button"
-                      onClick={handleOpenCreateExpenseModal}
-                      disabled={!selectedClientId}
-                    >
-                      <PlusCircle className="size-4" />
-                      Add Expense
-                    </Button>
-                  </div>
-                </div>
-                <Separator />
-                <div className="overflow-hidden rounded-xl border border-border/70">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Transaction Date</TableHead>
-                        <TableHead>Expense Type</TableHead>
-                        <TableHead>VAT Status</TableHead>
-                        <TableHead className="text-right">Amount</TableHead>
-                        <TableHead className="w-[220px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {isLoadingExpenses ? (
-                        <TableRow>
-                          <TableCell colSpan={5}>Loading...</TableCell>
-                        </TableRow>
-                      ) : filteredExpenses.length ? (
-                        filteredExpenses.map((entry) => (
-                          <TableRow key={entry.id}>
-                            <TableCell>{entry.transaction_date}</TableCell>
-                            <TableCell>
-                              {EXPENSE_TYPE_LABELS[entry.expense_type]}
-                            </TableCell>
-                            <TableCell>
-                              {entry.vat_status === "vat" ? "VAT" : "Non-VAT"}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              {entry.amount.toFixed(2)}
-                            </TableCell>
-                            <TableCell>
-                              <div className="flex gap-2">
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => openEditExpenseModal(entry)}
-                                >
-                                  <Pencil className="size-4" /> Edit
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="destructive"
-                                  onClick={() => {
-                                    setExpensePendingDelete(entry);
-                                    setIsDeleteExpenseModalOpen(true);
-                                  }}
-                                >
-                                  <Trash2 className="size-4" /> Delete
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        ))
-                      ) : (
-                        <TableRow>
-                          <TableCell
-                            colSpan={5}
-                            className="text-center text-muted-foreground"
-                          >
-                            {expenseFilterDate
-                              ? "No expenses found for the selected day."
-                              : "No expenses found."}
-                          </TableCell>
-                        </TableRow>
-                      )}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
+              <ClientExpensesSection
+                isSalesFilterPopoverOpen={isSalesFilterPopoverOpen}
+                setIsSalesFilterPopoverOpen={setIsSalesFilterPopoverOpen}
+                expenseFilterDate={expenseFilterDate}
+                setExpenseFilterDate={setExpenseFilterDate}
+                expenseDatesWithData={expenseDatesWithData}
+                setIsClientExpensesExportModalOpen={
+                  setIsClientExpensesExportModalOpen
+                }
+                selectedClientId={selectedClientId}
+                handleOpenCreateExpenseModal={handleOpenCreateExpenseModal}
+                isLoadingExpenses={isLoadingExpenses}
+                filteredExpenses={filteredExpenses}
+                expenseTypeLabels={EXPENSE_TYPE_LABELS}
+                openEditExpenseModal={openEditExpenseModal}
+                setExpensePendingDelete={setExpensePendingDelete}
+                setIsDeleteExpenseModalOpen={setIsDeleteExpenseModalOpen}
+              />
             ) : null}
 
             {!isLoadingWorkspace && section === "catalog" ? (
@@ -1961,31 +1651,11 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="client-sales-export-month">Month</Label>
-                <Select
-                  value={String(exportMonth)}
-                  onValueChange={(value) => setExportMonth(Number(value))}
-                >
-                  <SelectTrigger
-                    id="client-sales-export-month"
-                    className="w-full"
-                  >
-                    <SelectValue placeholder="Month" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">January</SelectItem>
-                    <SelectItem value="2">February</SelectItem>
-                    <SelectItem value="3">March</SelectItem>
-                    <SelectItem value="4">April</SelectItem>
-                    <SelectItem value="5">May</SelectItem>
-                    <SelectItem value="6">June</SelectItem>
-                    <SelectItem value="7">July</SelectItem>
-                    <SelectItem value="8">August</SelectItem>
-                    <SelectItem value="9">September</SelectItem>
-                    <SelectItem value="10">October</SelectItem>
-                    <SelectItem value="11">November</SelectItem>
-                    <SelectItem value="12">December</SelectItem>
-                  </SelectContent>
-                </Select>
+                <MonthSelect
+                  id="client-sales-export-month"
+                  value={exportMonth}
+                  onValueChange={setExportMonth}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="client-sales-export-year">Year</Label>
@@ -2838,33 +2508,11 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label htmlFor="client-expenses-export-month">Month</Label>
-                <Select
-                  value={String(expensePreviewMonth)}
-                  onValueChange={(value) =>
-                    setExpensePreviewMonth(Number(value))
-                  }
-                >
-                  <SelectTrigger
-                    id="client-expenses-export-month"
-                    className="w-full"
-                  >
-                    <SelectValue placeholder="Month" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="1">January</SelectItem>
-                    <SelectItem value="2">February</SelectItem>
-                    <SelectItem value="3">March</SelectItem>
-                    <SelectItem value="4">April</SelectItem>
-                    <SelectItem value="5">May</SelectItem>
-                    <SelectItem value="6">June</SelectItem>
-                    <SelectItem value="7">July</SelectItem>
-                    <SelectItem value="8">August</SelectItem>
-                    <SelectItem value="9">September</SelectItem>
-                    <SelectItem value="10">October</SelectItem>
-                    <SelectItem value="11">November</SelectItem>
-                    <SelectItem value="12">December</SelectItem>
-                  </SelectContent>
-                </Select>
+                <MonthSelect
+                  id="client-expenses-export-month"
+                  value={expensePreviewMonth}
+                  onValueChange={setExpensePreviewMonth}
+                />
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="client-expenses-export-year">Year</Label>
@@ -2964,13 +2612,11 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                     {expensePreviewColumns.map((column, index) => (
                       <TableHead
                         key={`preview-col-${index}-${column}`}
-                        className={
-                          index === expensePreviewColumns.length - 1
-                            ? "sticky right-0 z-20 w-[120px] min-w-[120px] bg-background"
-                            : index === expensePreviewColumns.length - 2
-                              ? "sticky right-[120px] z-20 w-[120px] min-w-[120px] bg-background"
-                              : undefined
-                        }
+                        className={getExpensePreviewStickyClass(
+                          index,
+                          expensePreviewColumns.length,
+                          "z-20",
+                        )}
                       >
                         {column}
                       </TableHead>
@@ -2985,13 +2631,18 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                           <TableCell
                             key={`${row.id}-cell-${index}`}
                             className={
-                              index === expensePreviewColumns.length - 1
-                                ? "sticky right-0 z-10 w-[120px] min-w-[120px] bg-background text-right"
-                                : index === expensePreviewColumns.length - 2
-                                  ? "sticky right-[120px] z-10 w-[120px] min-w-[120px] bg-background text-right"
-                                  : index >= 2
-                                    ? "text-right"
-                                    : ""
+                              index >= 2
+                                ? getExpensePreviewStickyClass(
+                                    index,
+                                    expensePreviewColumns.length,
+                                    "z-10",
+                                    true,
+                                  )
+                                : getExpensePreviewStickyClass(
+                                    index,
+                                    expensePreviewColumns.length,
+                                    "z-10",
+                                  )
                             }
                           >
                             {value}
@@ -3020,13 +2671,18 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                       <TableHead
                         key={`total-col-${index}-${column}`}
                         className={
-                          index === expensePreviewColumns.length - 1
-                            ? "sticky right-0 z-20 w-[120px] min-w-[120px] bg-background text-right"
-                            : index === expensePreviewColumns.length - 2
-                              ? "sticky right-[120px] z-20 w-[120px] min-w-[120px] bg-background text-right"
-                              : index >= 2
-                                ? "text-right"
-                                : ""
+                          index >= 2
+                            ? getExpensePreviewStickyClass(
+                                index,
+                                expensePreviewColumns.length,
+                                "z-20",
+                                true,
+                              )
+                            : getExpensePreviewStickyClass(
+                                index,
+                                expensePreviewColumns.length,
+                                "z-20",
+                              )
                         }
                       >
                         {column}
@@ -3049,14 +2705,18 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                         <TableCell
                           key={`total-value-${index}-${column}`}
                           className={
-                            index === expensePreviewColumns.length - 1
-                              ? "sticky right-0 z-10 w-[120px] min-w-[120px] bg-background text-right"
-                              : index === expensePreviewColumns.length - 2
-                                ? "sticky right-[120px] z-10 w-[120px] min-w-[120px] bg-background text-right"
-                                : label === "DATE" ||
-                                    label.startsWith("VOUCHER")
-                                  ? ""
-                                  : "text-right"
+                            label === "DATE" || label.startsWith("VOUCHER")
+                              ? getExpensePreviewStickyClass(
+                                  index,
+                                  expensePreviewColumns.length,
+                                  "z-10",
+                                )
+                              : getExpensePreviewStickyClass(
+                                  index,
+                                  expensePreviewColumns.length,
+                                  "z-10",
+                                  true,
+                                )
                           }
                         >
                           {display}

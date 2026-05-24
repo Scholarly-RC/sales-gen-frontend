@@ -3,15 +3,10 @@
 import { useState } from "react";
 import type { UseFormReturn } from "react-hook-form";
 
+import type { RequestFn } from "@/lib/http";
 import { appToast } from "@/lib/toast";
 import { type ClientFormValues, clientSchema } from "@/lib/workspace/schemas";
 import type { Client, ClientExport } from "@/types/workspace";
-
-type RequestFn = <T>(
-  path: string,
-  token: string,
-  init?: RequestInit,
-) => Promise<T>;
 
 type UseClientActionsParams = {
   token: string | null;
