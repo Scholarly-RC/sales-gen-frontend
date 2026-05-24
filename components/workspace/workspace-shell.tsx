@@ -1804,7 +1804,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               <p className="text-xs text-muted-foreground">
                 Current:{" "}
                 {selectedClient?.sales_template_file_name ||
-                  "Default master template"}
+                  "No template uploaded"}
                 {salesTemplateFile ? ` | New: ${salesTemplateFile.name}` : ""}
               </p>
             </div>
@@ -1824,7 +1824,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               <p className="text-xs text-muted-foreground">
                 Current:{" "}
                 {selectedClient?.expenses_template_file_name ||
-                  "Default master template"}
+                  "No template uploaded"}
                 {expensesTemplateFile
                   ? ` | New: ${expensesTemplateFile.name}`
                   : ""}
