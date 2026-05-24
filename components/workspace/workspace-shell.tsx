@@ -356,9 +356,13 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     clientPendingDelete,
     isSavingClient,
     isDeletingClient,
+    salesTemplateFile,
+    expensesTemplateFile,
     setIsClientModalOpen,
     setIsDeleteClientModalOpen,
     setClientPendingDelete,
+    setSalesTemplateFile,
+    setExpensesTemplateFile,
     openClientCreateModal,
     openClientEditModal,
     submitClientForm,
@@ -1736,7 +1740,16 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
         </aside>
       ) : null}
 
-      <Dialog open={isClientModalOpen} onOpenChange={setIsClientModalOpen}>
+      <Dialog
+        open={isClientModalOpen}
+        onOpenChange={(open) => {
+          setIsClientModalOpen(open);
+          if (!open) {
+            setSalesTemplateFile(null);
+            setExpensesTemplateFile(null);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -1774,6 +1787,48 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
             <div className="grid gap-2">
               <Label>Notes</Label>
               <Input {...clientForm.register("notes")} placeholder="Notes" />
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="sales-template-file">
+                Sales Template (.xlsx)
+              </Label>
+              <Input
+                id="sales-template-file"
+                type="file"
+                accept=".xlsx"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  setSalesTemplateFile(file);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Current:{" "}
+                {selectedClient?.sales_template_file_name ||
+                  "Default master template"}
+                {salesTemplateFile ? ` | New: ${salesTemplateFile.name}` : ""}
+              </p>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="expenses-template-file">
+                Expenses Template (.xlsx)
+              </Label>
+              <Input
+                id="expenses-template-file"
+                type="file"
+                accept=".xlsx"
+                onChange={(event) => {
+                  const file = event.target.files?.[0] ?? null;
+                  setExpensesTemplateFile(file);
+                }}
+              />
+              <p className="text-xs text-muted-foreground">
+                Current:{" "}
+                {selectedClient?.expenses_template_file_name ||
+                  "Default master template"}
+                {expensesTemplateFile
+                  ? ` | New: ${expensesTemplateFile.name}`
+                  : ""}
+              </p>
             </div>
             <Button type="submit" disabled={isSavingClient}>
               {isSavingClient ? (

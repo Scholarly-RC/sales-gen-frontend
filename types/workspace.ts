@@ -59,6 +59,10 @@ export type Client = {
   name: string;
   company: string | null;
   notes: string | null;
+  sales_template_storage_key: string | null;
+  sales_template_file_name: string | null;
+  expenses_template_storage_key: string | null;
+  expenses_template_file_name: string | null;
   created_at: string;
   updated_at: string;
 };
