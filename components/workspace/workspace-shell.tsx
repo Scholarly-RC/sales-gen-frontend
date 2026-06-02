@@ -318,7 +318,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setIsOcrQueueHidden,
   } = useOcrJobs({
     token: status === "authenticated" ? token : null,
-    enabled: Boolean(user),
+    enabled: Boolean(user) && !DISABLE_PROCESS_OCR_SALE,
     request,
   });
 
