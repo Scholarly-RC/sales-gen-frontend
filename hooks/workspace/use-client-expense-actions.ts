@@ -8,7 +8,6 @@ import { appToast } from "@/lib/toast";
 import { downloadFileWithToken } from "@/lib/workspace/download";
 import type {
   ClientExpense,
-  ClientExpensesExportResponse,
   ClientExpensesPreviewResponse,
   ClientExpenseType,
   ClientVatStatus,
@@ -371,15 +370,11 @@ export function useClientExpenseActions({
 
     setIsExportingClientExpenses(true);
     try {
-      const payload = await request<ClientExpensesExportResponse>(
-        `/clients/${selectedClientId}/expenses/export-xlsx?year=${expensePreviewYear}&month=${expensePreviewMonth}`,
-        token,
-        { method: "POST" },
-      );
       await downloadFileWithToken({
         token,
-        downloadPath: payload.download_path,
-        fileName: payload.file_name,
+        path: `/clients/${selectedClientId}/expenses/export-xlsx?year=${expensePreviewYear}&month=${expensePreviewMonth}`,
+        init: { method: "POST" },
+        fileName: `client_expenses_${selectedClientId}_${expensePreviewYear}_${String(expensePreviewMonth).padStart(2, "0")}.xlsx`,
         errorMessage: "Unable to download monthly expense file",
       });
       const month = String(expensePreviewMonth).padStart(2, "0");

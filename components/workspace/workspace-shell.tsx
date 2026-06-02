@@ -399,7 +399,6 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     saleImages,
     salesFilterDate,
     saleImagesError,
-    processedExport,
     isExportingClientSales,
     isLoadingClientSalesPreview,
     exportMonth,
@@ -442,7 +441,6 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     resetClientSaleForm,
     openEditClientSaleModal,
     handleSubmitClientSaleForm,
-    handleDownloadProcessedFile,
     handleExportClientSalesByMonth,
     handlePreviewClientSalesByMonth,
     handleSaveDailySummarySales,
@@ -2064,15 +2062,6 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
               )}
               Process Sales
             </Button>
-            {processedExport ? (
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => void handleDownloadProcessedFile()}
-              >
-                Download Processed Excel
-              </Button>
-            ) : null}
           </form>
         </DialogContent>
       </Dialog>

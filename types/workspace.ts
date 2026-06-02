@@ -165,25 +165,6 @@ export type OcrParentSubmissionResponse = {
   error_message: string | null;
 };
 
-export type OcrSalesExportResponse = {
-  submission_id?: string;
-  parent_submission_id?: string;
-  file_name: string;
-  download_path: string;
-};
-
-export type ClientSalesExportResponse = {
-  client_id: string;
-  file_name: string;
-  download_path: string;
-};
-
-export type ClientExpensesExportResponse = {
-  client_id: string;
-  file_name: string;
-  download_path: string;
-};
-
 export type ClientExpensesPreviewResponse = {
   client_id: string;
   year: number;

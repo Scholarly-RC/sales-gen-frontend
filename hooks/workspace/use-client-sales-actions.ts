@@ -15,10 +15,8 @@ import type {
   ClientCatalogItemSuggestion,
   ClientExport,
   ClientSaleFormItem,
-  ClientSalesExportResponse,
   ClientSalesPreviewResponse,
   OcrParentSubmissionResponse,
-  OcrSalesExportResponse,
 } from "@/types/workspace";
 
 type UseClientSalesActionsParams = {
@@ -53,8 +51,6 @@ export function useClientSalesActions({
     () => new Date(),
   );
   const [saleImagesError, setSaleImagesError] = useState<string | null>(null);
-  const [processedExport, setProcessedExport] =
-    useState<OcrSalesExportResponse | null>(null);
   const [isExportingClientSales, setIsExportingClientSales] = useState(false);
   const [isLoadingClientSalesPreview, setIsLoadingClientSalesPreview] =
     useState(false);
@@ -181,7 +177,6 @@ export function useClientSalesActions({
     }
 
     setIsRunningOcr(true);
-    setProcessedExport(null);
 
     try {
       const formData = new FormData();
@@ -219,17 +214,16 @@ export function useClientSalesActions({
           );
         }
 
-        const exported = await request<OcrSalesExportResponse>(
-          `/ocr-parent-submissions/${latest.parent_submission_id}/export-xlsx`,
+        await downloadFileWithToken({
           token,
-          {
-            method: "POST",
-          },
-        );
-        setProcessedExport(exported);
+          path: `/ocr-parent-submissions/${latest.parent_submission_id}/export-xlsx`,
+          init: { method: "POST" },
+          fileName: `sales_${latest.parent_submission_id}.xlsx`,
+          errorMessage: "Unable to download processed sales file",
+        });
         appToast.success({
           title: "Sales processed successfully",
-          description: "File is ready to download.",
+          description: "Processed sales file downloaded.",
         });
       }
     } catch (error) {
@@ -403,28 +397,6 @@ export function useClientSalesActions({
     }
   }
 
-  async function handleDownloadProcessedFile() {
-    if (!token || !processedExport) {
-      return;
-    }
-
-    try {
-      await downloadFileWithToken({
-        token,
-        downloadPath: processedExport.download_path,
-        fileName: processedExport.file_name,
-        errorMessage: "Unable to download processed sales file",
-      });
-    } catch (error) {
-      const message =
-        error instanceof Error ? error.message : "Unable to download file";
-      appToast.error({
-        title: "Download failed",
-        description: message,
-      });
-    }
-  }
-
   async function handleExportClientSalesByMonth(): Promise<boolean> {
     if (!token || !selectedClientId || isExportingClientSales) {
       return false;
@@ -432,17 +404,11 @@ export function useClientSalesActions({
 
     setIsExportingClientSales(true);
     try {
-      const payload = await request<ClientSalesExportResponse>(
-        `/clients/${selectedClientId}/exports/export-xlsx?year=${exportYear}&month=${exportMonth}`,
-        token,
-        {
-          method: "POST",
-        },
-      );
       await downloadFileWithToken({
         token,
-        downloadPath: payload.download_path,
-        fileName: payload.file_name,
+        path: `/clients/${selectedClientId}/exports/export-xlsx?year=${exportYear}&month=${exportMonth}`,
+        init: { method: "POST" },
+        fileName: `client_sales_${selectedClientId}_${exportYear}_${String(exportMonth).padStart(2, "0")}.xlsx`,
         errorMessage: "Unable to download monthly sales file",
       });
 
@@ -573,7 +539,6 @@ export function useClientSalesActions({
     saleImages,
     salesFilterDate,
     saleImagesError,
-    processedExport,
     isExportingClientSales,
     isLoadingClientSalesPreview,
     exportMonth,
@@ -616,7 +581,6 @@ export function useClientSalesActions({
     resetClientSaleForm,
     openEditClientSaleModal,
     handleSubmitClientSaleForm,
-    handleDownloadProcessedFile,
     handleExportClientSalesByMonth,
     handlePreviewClientSalesByMonth,
     handleSaveDailySummarySales,
