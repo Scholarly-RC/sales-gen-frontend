@@ -78,24 +78,38 @@ type RefreshTokenResponse = {
   access_token: string;
 };
 
-async function tryRefreshAccessToken(baseUrl: string): Promise<string | null> {
-  const response = await fetch(`${baseUrl}/auth/refresh`, {
-    method: "POST",
-    cache: "no-store",
-    credentials: "include",
-  });
+let inFlightRefreshTokenRequest: Promise<string | null> | null = null;
 
-  if (!response.ok) {
-    return null;
+export async function refreshAccessToken(
+  baseUrl = API_BASE_URL,
+): Promise<string | null> {
+  if (!inFlightRefreshTokenRequest) {
+    inFlightRefreshTokenRequest = (async () => {
+      const response = await fetch(`${baseUrl}/auth/refresh`, {
+        method: "POST",
+        cache: "no-store",
+        credentials: "include",
+      });
+
+      if (!response.ok) {
+        return null;
+      }
+
+      const body = (await response.json()) as RefreshTokenResponse;
+      if (!body.access_token) {
+        return null;
+      }
+
+      setAuthToken(body.access_token);
+      return body.access_token;
+    })();
   }
 
-  const body = (await response.json()) as RefreshTokenResponse;
-  if (!body.access_token) {
-    return null;
+  try {
+    return await inFlightRefreshTokenRequest;
+  } finally {
+    inFlightRefreshTokenRequest = null;
   }
-
-  setAuthToken(body.access_token);
-  return body.access_token;
 }
 
 export async function apiRequest<T>(
@@ -133,7 +147,7 @@ export async function apiRequest<T>(
       path !== "/auth/login" &&
       path !== "/auth/refresh";
     if (canRetryWithRefresh) {
-      const nextToken = await tryRefreshAccessToken(baseUrl);
+      const nextToken = await refreshAccessToken(baseUrl);
       if (nextToken) {
         return apiRequest<T>(path, {
           ...options,

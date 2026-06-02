@@ -171,7 +171,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
   const [isSalesFilterPopoverOpen, setIsSalesFilterPopoverOpen] =
     useState(false);
 
-  const token = useWorkspaceToken();
+  const { token, status } = useWorkspaceToken();
   const [isClientSaleOcrModalOpen, setIsClientSaleOcrModalOpen] =
     useState(false);
   const [isClientSalesExportModalOpen, setIsClientSalesExportModalOpen] =
@@ -196,8 +196,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
 
   const handleAuthFailure = useCallback(() => {
     clearAuthToken();
-    router.replace("/login");
-  }, [router]);
+  }, []);
 
   const {
     user,
@@ -213,7 +212,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setSelectedClientId,
     refreshExports,
   } = useWorkspaceData({
-    token,
+    token: status === "authenticated" ? token : null,
     section,
     request,
     onAuthFailure: handleAuthFailure,
@@ -318,7 +317,8 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     setOcrJobs,
     setIsOcrQueueHidden,
   } = useOcrJobs({
-    token,
+    token: status === "authenticated" ? token : null,
+    enabled: Boolean(user),
     request,
   });
 
@@ -327,7 +327,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     handleStopQueuedOcrJob,
     handleRemoveFinishedOcrJobs,
   } = useOcrJobActions({
-    token,
+    token: status === "authenticated" ? token : null,
     request,
     setOcrJobs,
   });
@@ -844,7 +844,6 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     }
     clearAuthToken();
     router.replace("/login");
-    router.refresh();
   }
 
   const pageTitle =
@@ -880,6 +879,21 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
   function handleOpenCreateExpenseModal() {
     openCreateExpenseModal();
     setExpenseDate(activeDate);
+  }
+
+  if (status === "loading") {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <div className="flex items-center gap-3 text-sm text-muted-foreground">
+          <LoaderCircle className="size-4 animate-spin" />
+          Restoring session...
+        </div>
+      </div>
+    );
+  }
+
+  if (status === "unauthenticated") {
+    return null;
   }
 
   return (

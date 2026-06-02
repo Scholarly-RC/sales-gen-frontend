@@ -39,7 +39,6 @@ export function LoginForm() {
       const result = await login(email.trim(), password);
       setAuthToken(result.access_token);
       router.replace("/workspace");
-      router.refresh();
     } catch (submitError) {
       appToast.error({
         title: "Unable to sign in",

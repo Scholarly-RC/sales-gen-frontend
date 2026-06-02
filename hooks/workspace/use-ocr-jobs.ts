@@ -8,10 +8,11 @@ import type { OcrJob } from "@/types/workspace";
 
 type UseOcrJobsParams = {
   token: string | null;
+  enabled: boolean;
   request: RequestFn;
 };
 
-export function useOcrJobs({ token, request }: UseOcrJobsParams) {
+export function useOcrJobs({ token, enabled, request }: UseOcrJobsParams) {
   const [ocrJobs, setOcrJobs] = useState<OcrJob[]>([]);
   const [isOcrQueueHidden, setIsOcrQueueHidden] = useState(false);
 
@@ -42,15 +43,16 @@ export function useOcrJobs({ token, request }: UseOcrJobsParams) {
   );
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !enabled) {
+      setOcrJobs([]);
       return;
     }
 
     void loadOcrJobs(token);
-  }, [loadOcrJobs, token]);
+  }, [enabled, loadOcrJobs, token]);
 
   useEffect(() => {
-    if (!token) {
+    if (!token || !enabled) {
       return;
     }
 
@@ -76,7 +78,7 @@ export function useOcrJobs({ token, request }: UseOcrJobsParams) {
     return () => {
       socket.close();
     };
-  }, [token]);
+  }, [enabled, token]);
 
   return {
     ocrJobs,
