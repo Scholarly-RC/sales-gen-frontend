@@ -970,7 +970,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                         setActiveDate(format(date, "yyyy-MM-dd"));
                         setIsActiveDatePopoverOpen(false);
                       }}
-                      initialFocus
+                      autoFocus
                     />
                   </PopoverContent>
                 </Popover>

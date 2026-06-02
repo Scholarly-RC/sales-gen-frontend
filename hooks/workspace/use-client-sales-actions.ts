@@ -134,14 +134,17 @@ export function useClientSalesActions({
       return;
     }
 
+    const authToken = token;
+    const clientId = selectedClientId;
+    const salesDateKey = selectedSalesDateKey;
     let isCancelled = false;
     async function loadDailySummary() {
       try {
         const payload = await request<{
           total_summary_sales: number;
         } | null>(
-          `/clients/${selectedClientId}/daily-summary?sale_date=${selectedSalesDateKey}`,
-          token,
+          `/clients/${clientId}/daily-summary?sale_date=${salesDateKey}`,
+          authToken,
         );
         if (isCancelled) {
           return;

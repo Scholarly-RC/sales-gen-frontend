@@ -124,12 +124,12 @@ export async function apiRequest<T>(
     skipRefreshRetry = false,
   } = options;
 
-  const headers: HeadersInit = { ...(init?.headers ?? {}) };
+  const headers = new Headers(init?.headers);
   if (token) {
-    headers.Authorization = `Bearer ${token}`;
+    headers.set("Authorization", `Bearer ${token}`);
   }
   if (!(init?.body instanceof FormData)) {
-    headers["Content-Type"] = "application/json";
+    headers.set("Content-Type", "application/json");
   }
 
   const response = await fetch(`${baseUrl}${path}`, {
