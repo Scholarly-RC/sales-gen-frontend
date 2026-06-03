@@ -25,20 +25,21 @@ export const EXPENSE_TYPE_OPTIONS: Array<{
   value: ClientExpenseType;
   label: string;
 }> = [
-  { value: "employee_benefits", label: "Employee Benefits" },
-  { value: "fuel", label: "Fuel" },
-  { value: "insurance", label: "Insurance" },
-  { value: "internet", label: "Internet" },
-  { value: "marketing_ads", label: "Marketing Ads" },
-  { value: "office_supplies", label: "Office Supplies" },
-  { value: "professional_fees", label: "Professional Fees" },
-  { value: "rent", label: "Rent" },
+  { value: "food_ingredients", label: "Food Ingredients" },
+  { value: "drink_ingredients", label: "Drink Ingredients" },
+  { value: "water_expense", label: "Water Expense" },
+  { value: "savings", label: "Savings" },
+  { value: "kitchen_fuel_expense", label: "Kitchen Fuel Expense" },
+  { value: "salaries_expense", label: "Salaries Expense" },
+  { value: "kitchen_supplies_expense", label: "Kitchen Supplies Expense" },
+  { value: "office_supplies_expense", label: "Office Supplies Expense" },
+  { value: "cleaning_supplies_expense", label: "Cleaning Supplies Expense" },
+  { value: "purchase_resale_items", label: "Purchase - Resale Items" },
+  { value: "drawings", label: "Drawings" },
+  { value: "snacks_and_meals_expense", label: "Snacks and Meals Expense" },
+  { value: "packaging_supplies_expense", label: "Packaging Supplies Expense" },
   { value: "repairs_maintenance", label: "Repairs and Maintenance" },
-  { value: "salaries_wages", label: "Salaries and Wages" },
-  { value: "taxes_licenses", label: "Taxes and Licenses" },
-  { value: "telephone_mobile", label: "Telephone and Mobile" },
-  { value: "transportation", label: "Transportation" },
-  { value: "utilities", label: "Utilities" },
+  { value: "fuel_expense", label: "Fuel Expense" },
 ];
 
 export const VAT_STATUS_OPTIONS: Array<{
@@ -49,7 +50,7 @@ export const VAT_STATUS_OPTIONS: Array<{
   { value: "non_vat", label: "Non-VAT" },
 ];
 
-const DEFAULT_EXPENSE_TYPE: ClientExpenseType = "employee_benefits";
+const DEFAULT_EXPENSE_TYPE: ClientExpenseType = "food_ingredients";
 const DEFAULT_VAT_STATUS: ClientVatStatus = "vat";
 type ExpenseLine = {
   id: string;

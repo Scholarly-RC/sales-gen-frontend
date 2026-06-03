@@ -16,20 +16,21 @@ export const WORKSPACE_SECTIONS: WorkspaceSection[] = [
 ];
 
 export type ClientExpenseType =
-  | "employee_benefits"
-  | "fuel"
-  | "insurance"
-  | "internet"
-  | "marketing_ads"
-  | "office_supplies"
-  | "professional_fees"
-  | "rent"
+  | "food_ingredients"
+  | "drink_ingredients"
+  | "water_expense"
+  | "savings"
+  | "kitchen_fuel_expense"
+  | "salaries_expense"
+  | "kitchen_supplies_expense"
+  | "office_supplies_expense"
+  | "cleaning_supplies_expense"
+  | "purchase_resale_items"
+  | "drawings"
+  | "snacks_and_meals_expense"
+  | "packaging_supplies_expense"
   | "repairs_maintenance"
-  | "salaries_wages"
-  | "taxes_licenses"
-  | "telephone_mobile"
-  | "transportation"
-  | "utilities";
+  | "fuel_expense";
 
 export type ClientVatStatus = "vat" | "non_vat";
 
