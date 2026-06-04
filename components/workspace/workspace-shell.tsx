@@ -779,24 +779,26 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
     () => parsePreviewNumber(dailySummarySalesInput),
     [dailySummarySalesInput],
   );
+  const displayedSummaryOfSales =
+    activePreviewSheetTotals.totalSummaryOfSales ?? manualSummaryOfSales;
   const computedVariance = useMemo(() => {
     if (
       activePreviewSheetTotals.totalSalesFromOrderSlip === null ||
       activePreviewSheetTotals.totalDiscount === null ||
-      manualSummaryOfSales === null
+      displayedSummaryOfSales === null
     ) {
       return null;
     }
 
     return (
-      manualSummaryOfSales +
+      displayedSummaryOfSales +
       activePreviewSheetTotals.totalDiscount -
       activePreviewSheetTotals.totalSalesFromOrderSlip
     );
   }, [
     activePreviewSheetTotals.totalDiscount,
     activePreviewSheetTotals.totalSalesFromOrderSlip,
-    manualSummaryOfSales,
+    displayedSummaryOfSales,
   ]);
   const usersWithCurrent = useMemo(() => {
     if (!user) {
@@ -1973,7 +1975,7 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                           Daily Summary of Sales
                         </p>
                         <p className="text-base font-semibold tabular-nums">
-                          {manualSummaryOfSales?.toFixed(2) ?? "-"}
+                          {displayedSummaryOfSales?.toFixed(2) ?? "-"}
                         </p>
                       </div>
                       <div className="space-y-2 text-sm">
@@ -1990,7 +1992,9 @@ export function WorkspaceShell({ section }: { section: WorkspaceSection }) {
                         </p>
                         <p className="text-base font-semibold tabular-nums">
                           Computed Variance:{" "}
-                          {computedVariance?.toFixed(2) ?? "-"}
+                          {(activePreviewSheetTotals.variance ?? computedVariance)?.toFixed(
+                            2,
+                          ) ?? "-"}
                         </p>
                       </div>
                     </div>
